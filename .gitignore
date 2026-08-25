@@ -1,0 +1,7 @@
+*.fits
+*.pyc
+__pycache__/
+.ipynb_checkpoints/
+data/
+*.npy
+*.pdf
