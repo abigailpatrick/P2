@@ -36,11 +36,17 @@ for name, g in per_grating.items():
 out["ra"] = radec["ra"]
 out["dec"] = radec["dec"]
 
+# Mean redshift across the gratings a source appears in, ignoring NaNs.
+z_cols = [f"z_{g}" for g in ["G235H", "G235M", "G395H", "G395M"]]
+out["z_av"] = out[z_cols].mean(axis=1, skipna=True)
+
 # Order columns as requested.
 cols = (["G235H", "G235M", "G395H", "G395M"]
         + [f"z_{g}" for g in ["G235H", "G235M", "G395H", "G395M"]]
-        + ["ra", "dec"])
+        + ["z_av", "ra", "dec"])
 out = out[cols].reset_index()
+
+
 
 out.to_csv(out_path, index=False)
 print(f"Wrote {len(out)} unique sources to {out_path}")
@@ -55,7 +61,7 @@ from astropy.visualization import simple_norm
 from skimage import measure
 
 cube_path = "/ceph/cephfs/apatrick/musecosmos/scripts/aligned/mosaics/big_cube/MEGA_CUBE_VAR_2.fits"
-check_png = f"{cat_dir}/muse_footprint_check.png"
+check_png = f"/ceph/cephfs/apatrick/P2/field_images/muse_footprint_check.png"
 
 with fits.open(cube_path, memmap=True) as hdul:
     hdr = hdul[0].header
