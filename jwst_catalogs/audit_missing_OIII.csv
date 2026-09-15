@@ -1,0 +1,11 @@
+ID,verdict,detail
+18502,should_be_measurable,G235H:in_range(21902AA in 16600-31697)
+41512,should_be_measurable,G235H:in_range(19836AA in 16600-31697)
+46887,should_be_measurable,G235H:in_range(21654AA in 16600-31697); G395H:out_of_range(21583AA vs 28300-52397)
+47137,should_be_measurable,G235H:in_range(25226AA in 16600-31697); G395H:out_of_range(25228AA vs 28300-52397)
+49939,should_be_measurable,G235H:in_range(23776AA in 16600-31697)
+42812,should_be_measurable,G235M:in_range(19979AA in 15800-52991)
+49540,should_be_measurable,G235M:in_range(22857AA in 15800-52991)
+59737,should_be_measurable,G235M:in_range(22117AA in 15800-52991); G395M:out_of_range(22111AA vs 26800-55099)
+45547,out_of_range_everywhere,G395H:out_of_range(27440AA vs 28300-52397)
+46008,out_of_range_everywhere,G395H:out_of_range(27081AA vs 28300-52397)

@@ -1,0 +1,419 @@
+[PATHS]
+  False-position dir : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions
+  Cube directory     : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub
+  Output directory   : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions
+  Kept-ID manifest   : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/false_positions_kept.csv
+  Kept IDs           : 61 sources
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15479_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_15479_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15479_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15479_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15748_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_15748_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15748_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_15748_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16853_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_16853_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16853_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16853_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16871_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_16871_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16871_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_16871_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17058_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_17058_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17058_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17058_false_optimal_snr.csv
+
+[FILTER] Src 17074: not in kept manifest, skipping
+[FILTER] Src 17086: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17416_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_17416_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17416_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17416_false_optimal_snr.csv
+
+[FILTER] Src 17578: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17806_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_17806_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17806_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_17806_false_optimal_snr.csv
+
+[FILTER] Src 17891: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18444_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_18444_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18444_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18444_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18502_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_18502_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18502_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_18502_false_optimal_snr.csv
+
+[FILTER] Src 18866: not in kept manifest, skipping
+[FILTER] Src 19819: not in kept manifest, skipping
+[FILTER] Src 23341: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_26580_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_26580_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_26580_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_26580_false_optimal_snr.csv
+
+[FILTER] Src 26999: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_28600_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_28600_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_28600_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_28600_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_29701_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_29701_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_29701_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_29701_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_33361_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_33361_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_33361_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_33361_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_35799_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_35799_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_35799_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_35799_false_optimal_snr.csv
+
+[FILTER] Src 38195: not in kept manifest, skipping
+[FILTER] Src 41512: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42751_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_42751_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42751_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42751_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42812_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_42812_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42812_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42812_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42990_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_42990_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42990_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_42990_false_optimal_snr.csv
+
+[FILTER] Src 43129: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43604_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_43604_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43604_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43604_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43683_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_43683_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43683_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_43683_false_optimal_snr.csv
+
+[FILTER] Src 43713: not in kept manifest, skipping
+[FILTER] Src 44361: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_44980_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_44980_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_44980_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_44980_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45004_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_45004_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45004_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45004_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45443_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_45443_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45443_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45443_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45547_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_45547_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45547_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45547_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45677_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_45677_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45677_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45677_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45963_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_45963_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45963_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_45963_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46008_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_46008_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46008_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46008_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46091_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_46091_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46091_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46091_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46212_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_46212_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46212_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46212_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46887_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_46887_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46887_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46887_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46979_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_46979_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46979_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_46979_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47137_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47137_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47137_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47137_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47218_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47218_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47218_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47218_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47283_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47283_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47283_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47283_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47549_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47549_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47549_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47549_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47664_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47664_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47664_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47664_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47736_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47736_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47736_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47736_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47750_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_47750_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47750_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_47750_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48086_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48086_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48086_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48086_false_optimal_snr.csv
+
+[FILTER] Src 48121: not in kept manifest, skipping
+[FILTER] Src 48146: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48256_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48256_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48256_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48256_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48525_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48525_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48525_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48525_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48586_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48586_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48586_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48586_false_optimal_snr.csv
+
+[FILTER] Src 48648: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48688_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48688_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48688_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48688_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48744_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_48744_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48744_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_48744_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49289_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_49289_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49289_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49289_false_optimal_snr.csv
+
+[FILTER] Src 49296: not in kept manifest, skipping
+[FILTER] Src 49482: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49540_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_49540_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49540_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49540_false_optimal_snr.csv
+
+[FILTER] Src 49694: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49726_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_49726_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49726_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49726_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49902_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_49902_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49902_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49902_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49939_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_49939_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49939_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_49939_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50654_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_50654_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50654_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50654_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50751_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_50751_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50751_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50751_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50966_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_50966_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50966_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50966_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50970_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_50970_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50970_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_50970_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51240_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_51240_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51240_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51240_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51579_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_51579_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51579_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_51579_false_optimal_snr.csv
+
+[FILTER] Src 53947: not in kept manifest, skipping
+[FILTER] Src 54193: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_54521_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_54521_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_54521_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_54521_false_optimal_snr.csv
+
+[FILTER] Src 55418: not in kept manifest, skipping
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_56591_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_56591_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_56591_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_56591_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57111_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_57111_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57111_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57111_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57248_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_57248_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57248_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_57248_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_58782_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_58782_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_58782_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_58782_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59457_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_59457_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59457_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59457_false_optimal_snr.csv
+
+[SOURCE]
+  False positions CSV : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59737_false_positions.csv
+  Cube                : /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_59737_lya_contsub_cube_velocity.fits
+  Output CSV          : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59737_false_optimal_snr.csv
+  [DONE] Saved /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_59737_false_optimal_snr.csv
+
+[ALL DONE] 61 sources processed, 22 filtered out by manifest, 0 skipped
+	Command being timed: "python optimize_lya_positions_f_grating.py --all --false-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ --outdir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions --kept-csv /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/false_positions_kept.csv --aperture 0.6 --dx-max 0.4 --dx-step 0.1 --prior-scale 1.0"
+	User time (seconds): 20528.61
+	System time (seconds): 3155.91
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 6:35:54
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 330632
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1248
+	Minor (reclaiming a frame) page faults: 2558046754
+	Voluntary context switches: 13602
+	Involuntary context switches: 41602
+	Swaps: 0
+	File system inputs: 366920
+	File system outputs: 6032
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

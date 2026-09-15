@@ -25,9 +25,6 @@ python extract_subcubes.py \
     --out-dir /cephfs/apatrick/P2/MUSE_subcubes \
     --in_muse_check
 
-The cube is memory-mapped, so the full 107 GB is never read into RAM. Only
-the requested spatial box across the spectral axis is pulled from disk per
-source.
 """
 
 import os

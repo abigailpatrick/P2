@@ -16,6 +16,12 @@ Adapted from the P1 version:
 For each source it excludes a central box around the true position and an edge
 margin, samples N random positions in the remaining area, writes them to a CSV,
 and saves a white-light diagnostic plot.
+
+Edge handling:
+  - Any source whose collapsed white-light image contains one or more NaN
+    pixels is skipped entirely (no CSV, no plot). This removes off-edge and
+    partially-off-edge subcubes from the false-positive population. Loosen by
+    changing the check in process_source if a stricter/looser rule is wanted.
 """
 
 import argparse
@@ -114,7 +120,7 @@ def process_source(sid, ra, dec, z, cube_dir, outdir, args):
     cube_path = os.path.join(cube_dir, f"source_{sid}_lya_contsub_cube_velocity.fits")
     if not os.path.exists(cube_path):
         print(f"[SKIP] Src {sid}: cube not found at {cube_path}")
-        return
+        return False
 
     source_coord = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
 
@@ -125,6 +131,23 @@ def process_source(sid, ra, dec, z, cube_dir, outdir, args):
         stat = hdul[args.var_ext].data if len(hdul) > args.var_ext else None
 
         w2d = get_wcs2d(hdr)
+
+        # --- Edge guard ---
+        # Skip if ANY spatial pixel is all-NaN through the spectral axis. This is
+        # exactly the condition that triggers numpy's "All-NaN slice encountered"
+        # warning inside nanmedian, and it is what leaves NaN pixels in the
+        # collapsed white-light image. Checked on the raw data before collapse so
+        # it applies regardless of collapse method.
+        data_arr = np.asarray(data, dtype=float)
+        allnan_map = np.all(~np.isfinite(data_arr), axis=0)
+        n_allnan = int(np.count_nonzero(allnan_map))
+        if n_allnan > 0:
+            frac = n_allnan / allnan_map.size
+            print(f"[SKIP] Src {sid}: {n_allnan} all-NaN spectral column(s) "
+                  f"({frac:.1%}) would trigger an All-NaN slice; treating as "
+                  f"off-edge. No false positions written.")
+            return False
+
         white = collapse_white_light(data, stat=stat, method=args.collapse)
         ny, nx = white.shape
 
@@ -172,6 +195,7 @@ def process_source(sid, ra, dec, z, cube_dir, outdir, args):
     fig.savefig(png_out, dpi=200)
     plt.close(fig)
     print(f"[OK] Src {sid}: wrote plot {png_out}")
+    return True
 
 
 def main():
@@ -228,15 +252,28 @@ def main():
         if len(df) == 0:
             raise ValueError(f"Requested ID {args.id} not found")
 
+    n_written, n_skipped = 0, 0
+    kept_ids = []
     for _, row in df.iterrows():
         sid = int(row[args.id_col])
-        process_source(
+        wrote = process_source(
             sid, float(row["ra"]), float(row["dec"]), float(row[args.z_col]),
             cube_dir, outdir, args,
         )
+        if wrote:
+            n_written += 1
+            kept_ids.append(sid)
+        else:
+            n_skipped += 1
+
+    # Write a manifest of the sources that were kept, for the optimiser to read
+    kept_path = os.path.join(outdir, "false_positions_kept.csv")
+    pd.DataFrame({"ID": kept_ids}).to_csv(kept_path, index=False)
 
     print("")
-    print("[DONE]")
+    print(f"[DONE] {n_written} sources written, {n_skipped} skipped "
+          f"(missing cube or all-NaN spectral columns)")
+    print(f"[MANIFEST] Kept IDs written to {kept_path}")
 
 
 if __name__ == "__main__":
@@ -246,15 +283,16 @@ if __name__ == "__main__":
 
 
 """
-run on all sources
+run on all good sources
 python false_pos_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
   --n 500 --box 8.0
+  
 
 run on one source
 python false_pos_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
   --id 15479 --n 500 --box 8.0
 """

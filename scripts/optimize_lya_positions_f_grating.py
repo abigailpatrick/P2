@@ -14,6 +14,9 @@ Adapted from the P1 version:
   - Each false position runs through the identical spatial grid search and
     positional prior as the real sources, so the false-positive population
     samples the same optimisation bias.
+  - In --all mode, an optional --kept-csv restricts processing to the source
+    IDs listed there (the manifest written by false_pos_grating.py), so stale
+    position CSVs from earlier runs are ignored.
 """
 
 import argparse
@@ -205,6 +208,11 @@ def main():
     p.add_argument("--outdir", default=None,
                    help="Directory for the per-source _false_optimal_snr.csv "
                         "outputs. Defaults to --false-dir.")
+    p.add_argument("--kept-csv", default=None,
+                   help="Optional manifest (false_positions_kept.csv) with an "
+                        "ID column. In --all mode, only these IDs are processed, "
+                        "so stale position CSVs from earlier runs are ignored. "
+                        "If omitted, every source_*_false_positions.csv is used.")
 
     p.add_argument("--aperture", type=float, default=0.6)
     p.add_argument("--pixscale", type=float, default=0.2)
@@ -243,6 +251,20 @@ def main():
         print(f"  False-position dir : {false_dir}")
         print(f"  Cube directory     : {cube_dir}")
         print(f"  Output directory   : {outdir}")
+
+        # Optional kept-ID manifest
+        kept_ids = None
+        if args.kept_csv:
+            kept_path = os.path.abspath(args.kept_csv)
+            print(f"  Kept-ID manifest   : {kept_path}")
+            kept_df = pd.read_csv(kept_path)
+            if "ID" not in kept_df.columns:
+                raise SystemExit(
+                    f"--kept-csv {kept_path} has no 'ID' column "
+                    f"(has {list(kept_df.columns)})"
+                )
+            kept_ids = set(int(x) for x in kept_df["ID"].dropna().astype(int))
+            print(f"  Kept IDs           : {len(kept_ids)} sources")
         print("")
 
         false_csvs = sorted(glob.glob(
@@ -250,7 +272,7 @@ def main():
         if not false_csvs:
             raise SystemExit(f"No false-position CSVs found in {false_dir}")
 
-        n_done, n_skipped = 0, 0
+        n_done, n_skipped, n_filtered = 0, 0, 0
         for false_path in false_csvs:
             m = re.search(r"source_(\d+)_false_positions", os.path.basename(false_path))
             if not m:
@@ -258,6 +280,12 @@ def main():
                 n_skipped += 1
                 continue
             sid = int(m.group(1))
+
+            # Skip IDs not in the kept manifest
+            if kept_ids is not None and sid not in kept_ids:
+                print(f"[FILTER] Src {sid}: not in kept manifest, skipping")
+                n_filtered += 1
+                continue
 
             cube_path = os.path.join(
                 cube_dir, f"source_{sid}_lya_contsub_cube_velocity.fits")
@@ -270,7 +298,8 @@ def main():
             run_one(false_path, cube_path, out_path, args)
             n_done += 1
 
-        print(f"[ALL DONE] {n_done} sources processed, {n_skipped} skipped")
+        print(f"[ALL DONE] {n_done} sources processed, "
+              f"{n_filtered} filtered out by manifest, {n_skipped} skipped")
         return
 
     # ---------------- Single-source mode ----------------
@@ -299,12 +328,13 @@ if __name__ == "__main__":
 
 
 """
-run on all sources (replaces the slurm array)
+run on all kept sources (uses the manifest from false_pos_grating.py)
 python optimize_lya_positions_f_grating.py \
   --all \
   --false-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
   --outdir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions \
+  --kept-csv /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/false_positions_kept.csv \
   --aperture 0.6 \
   --dx-max 0.4 \
   --dx-step 0.1 \

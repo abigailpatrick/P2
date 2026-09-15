@@ -4,6 +4,14 @@
 import numpy as np
 import pandas as pd
 from astropy.table import Table
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.visualization import simple_norm
+from skimage import measure
+from scipy.ndimage import distance_transform_edt
 
 cat_dir = "/ceph/cephfs/apatrick/P2/jwst_catalogs"
 out_path = f"{cat_dir}/grating_sources_by_JELS_ID.csv"
@@ -47,18 +55,8 @@ cols = (["G235H", "G235M", "G395H", "G395M"]
 out = out[cols].reset_index()
 
 
-
-out.to_csv(out_path, index=False)
-print(f"Wrote {len(out)} unique sources to {out_path}")
-
 # --- Add-on: flag sources within the real MUSE data region + sanity plot ---
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from astropy.io import fits
-from astropy.wcs import WCS
-from astropy.visualization import simple_norm
-from skimage import measure
+
 
 cube_path = "/ceph/cephfs/apatrick/musecosmos/scripts/aligned/mosaics/big_cube/MEGA_CUBE_VAR_2.fits"
 check_png = f"/ceph/cephfs/apatrick/P2/field_images/muse_footprint_check.png"
@@ -131,3 +129,82 @@ print(f"in_muse=0 total: {(in_muse == 0).sum()}")
 print(f"  off the slice grid (not drawn): {off_grid.sum()}")
 print(f"  on grid but invalid pixel: {on_grid_invalid.sum()}")
 print(f"  of off-grid, NaN position: {(~np.isfinite(x) | ~np.isfinite(y)).sum()}")
+
+# --- Add-on: edge proximity flag ---
+
+# Pad the valid mask with one ring of False so the field boundary counts as
+# an edge. Distance is then measured in pixels to the nearest invalid pixel.
+padded = np.pad(valid, 1, mode="constant", constant_values=False)
+dist_pix_padded = distance_transform_edt(padded)
+dist_pix = dist_pix_padded[1:-1, 1:-1]  # strip the padding back off
+
+ARCSEC_PER_PIX = 0.2
+EDGE_THRESH_ARCSEC = 6.0
+
+edge = np.zeros(len(out), dtype=int)
+on_valid = (in_muse == 1)  # only meaningful for sources on real data
+d_arcsec = dist_pix[yi[on_valid], xi[on_valid]] * ARCSEC_PER_PIX
+# 0 if >= 6 arcsec from an edge, else the rounded arcsec distance.
+edge_vals = np.where(d_arcsec >= EDGE_THRESH_ARCSEC, 0,
+                     np.round(d_arcsec).astype(int))
+edge[np.where(on_valid)[0]] = edge_vals
+out["edge"] = edge
+print(f"{(out['edge'] > 0).sum()} sources lie within {EDGE_THRESH_ARCSEC:g} arcsec of a field edge")
+
+# --- Add-on: duplicate position flag ---
+grouped = out.groupby(["ra", "dec"], sort=False)
+out["duplicate"] = 0
+flag = 0
+n_dup_rows = 0
+for (ra, dec), idx in grouped.groups.items():
+    if len(idx) > 1:
+        flag += 1
+        out.loc[idx, "duplicate"] = flag
+        ids = [int(i) for i in out.loc[idx, "ID"].tolist()]
+        print(f"Duplicate {flag}  ra={ra}  dec={dec}  ->  IDs {ids}")
+        n_dup_rows += len(idx)
+if flag == 0:
+    print("No duplicate positions found.")
+else:
+    print(f"Found {flag} duplicated position(s) covering {n_dup_rows} rows.")
+
+# --- Add-on: sodium AO laser gap flag ---
+LYA_REST = 1215.67
+AO_LO, AO_HI = 5802.0, 5967.0
+
+lya_obs = LYA_REST * (1.0 + out["z_av"].values)
+out["AO_block"] = ((lya_obs >= AO_LO) & (lya_obs <= AO_HI)).astype(int)
+
+
+# --- Summary counts ---
+in_field = out["in_muse"] == 1
+
+# Collapse duplicate pairs to one representative row. Non-duplicates (0) all
+# kept, each duplicate group (1, 2, ...) reduced to its first occurrence.
+is_rep = (out["duplicate"] == 0) | (~out["duplicate"].duplicated(keep="first") & (out["duplicate"] > 0))
+
+n_near_edge = int((out["edge"] > 0).sum())
+n_in_field = int(in_field.sum())
+n_unique_in_field = int((in_field & is_rep).sum())
+n_unique_clear = int((in_field & is_rep & (out["edge"] == 0)).sum())
+n_in_gap = int((out["AO_block"] == 1).sum())
+n_good = int((in_field & is_rep & (out["edge"] == 0) & (out["AO_block"] == 0)).sum())
+
+print("")
+print("--- Summary ---")
+print(f"Sources within {EDGE_THRESH_ARCSEC:g} arcsec of a field edge: {n_near_edge}")
+print(f"Sources in the MUSE field (total): {n_in_field}")
+print(f"Unique sources in the MUSE field (duplicate pair counted once): {n_unique_in_field}")
+print(f"Unique sources in the MUSE field more than {EDGE_THRESH_ARCSEC:g} arcsec from an edge: {n_unique_clear}")
+print(f"Sources with Lya in the sodium AO gap ({AO_LO:g}-{AO_HI:g} A): {n_in_gap}")
+print(f"Unique sources in field, clear of edge, and outside the AO gap: {n_good}")
+
+# Full catalogue with all flags.
+out.to_csv(out_path, index=False)
+print(f"Wrote updated catalogue with all flags to: {out_path}")
+
+# Good sample: unique, in field, clear of edge, outside AO gap.
+good = out[in_field & is_rep & (out["edge"] == 0) & (out["AO_block"] == 0)].copy()
+good_path = f"{cat_dir}/grating_sources_by_JELS_ID_good.csv"
+good.to_csv(good_path, index=False)
+print(f"Wrote {len(good)} good sources to: {good_path}")
