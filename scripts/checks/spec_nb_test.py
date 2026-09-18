@@ -1,30 +1,30 @@
 #!/usr/bin/env python
 """
-spec_nb_test.py
+spec_nb_single.py
 
-Interactive test-extraction tool for P2 grating subcubes.
+Single-source reproduction and test tool for the P2 grating Lya pipeline.
 
-Produces the same style of output as sliding_snr_lya_grating.py (a spectrum
-panel plus a pseudo-NB cutout) but gives manual control over:
+With just --id it reproduces the exact {ID}_flux_pseudonb.png figure and the
+exact peak S/N recorded in lya_sliding_snr_grating.csv, by reading the spectrum
+ap_extract_specs_grating.py already saved to {ID}_spectrum.npz and running the
+identical sliding_snr_lya_grating.py routine on it. No re-extraction, so the
+result is byte-identical to the pipeline.
 
-  - the spatial extraction position, via --dx-arcsec / --dy-arcsec offsets
-    applied to the catalogue RA/Dec (in sky coordinates, exactly as
-    ap_extract_specs_grating.py applies its optimal offsets)
-  - the wavelength the pseudo-NB and S/N window are centred on, via --nb-wave
-    (integer AA)
-  - the extraction / NB window width, via --window-width
+Overrides (each optional):
+  --dx           override dx offset (arcsec); default is the pipeline value
+  --dy           override dy offset (arcsec); default is the pipeline value
+  --linecenter   override the NB / best-centre wavelength (AA); default is the
+                 sliding-S/N peak inside lya_obs +/- half-width
 
-The spectrum is extracted in exactly the same way as ap_extract_specs_grating.py
-so the plot matches the pipeline output:
-  - select_lambda(wmin, wmax) on a window around --nb-wave
-  - coords_to_pixel via sky2pix(..., nearest=True)
-  - boolean circular aperture mask, summed with (sub.data * apmask).sum(axis=(1,2))
+When an override is given the spectrum is re-extracted from the cube at the new
+position, but over the SAME wavelength bounds as the stored npz. Because the
+cube spectral axis does not depend on spatial position, select_lambda snaps to
+the identical wavelength grid, so the sliding-window centres stay aligned and
+the new S/N is directly comparable to the pipeline number.
 
-Everything defaults to the pipeline values but each can be overridden. Output
-images are named {ID}_test.png. The peak S/N is reported inside the selected
-window (--nb-wave +/- window-width/2).
+The yellow dashed line marks the z_av-predicted (systemic) Lya position.
 
-Cubes are loaded with ext=(data_ext, var_ext) to avoid the mpdaf name collision.
+Cubes loaded with ext=(data_ext, var_ext) to dodge the mpdaf name collision.
 """
 
 import argparse
@@ -38,12 +38,13 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from scipy.ndimage import gaussian_filter1d
 from mpdaf.obj import Cube
+import astropy.units as u
 
 LYA_REST = 1215.67  # AA
 
 
 # ============================================================
-# Extraction utilities (matched to ap_extract_specs_grating.py)
+# Extraction utilities (verbatim from ap_extract_specs_grating.py)
 # ============================================================
 
 def load_cube(path, data_ext, var_ext):
@@ -83,8 +84,12 @@ def extract_1d_spectrum_with_var(cube, xpix, ypix, aperture_arcsec, pixel_scale,
     return wave, flux_1d, var_1d
 
 
+def z_to_wavelength(z, rest_wavelength=LYA_REST):
+    return (rest_wavelength * (1 + z)) * u.AA
+
+
 # ============================================================
-# Integration & SNR utilities (matched to sliding_snr_lya_grating.py)
+# S/N utilities (verbatim from sliding_snr_lya_grating.py)
 # ============================================================
 
 def integrate_flux(wave, flux, region):
@@ -129,7 +134,7 @@ def sliding_snr(wave, flux, var, window_width=10.0, step=1.0):
 
 
 # ============================================================
-# Pseudo-NB image
+# Pseudo-NB image (verbatim from sliding_snr_lya_grating.py)
 # ============================================================
 
 def extract_pseudonb_image(cube, wmin, wmax, xpix, ypix, size_arcsec, pixscale):
@@ -144,25 +149,22 @@ def extract_pseudonb_image(cube, wmin, wmax, xpix, ypix, size_arcsec, pixscale):
 
 
 # ============================================================
-# Plotting (matched to plot_flux_with_pseudonb)
+# Plot (verbatim from plot_flux_with_pseudonb)
 # ============================================================
 
-def plot_test(
+def plot_flux_with_pseudonb(
     wave, flux, var,
-    nb_wave, window_width,
+    best_center, window_width,
     cube, xpix, ypix,
     aperture_arcsec, pixscale,
     ra, dec, source_id,
-    dx_arcsec, dy_arcsec,
-    peak_snr,
-    nb_size_arcsec,
-    output_path, smooth_sigma=2
+    lya_obs, search_min, search_max,
+    output_path, smooth_sigma=2,
 ):
     half = window_width / 2.0
-    wmin, wmax = nb_wave - half, nb_wave + half
+    wmin, wmax = best_center - half, best_center + half
 
-    nb_img = extract_pseudonb_image(cube, wmin, wmax, xpix, ypix,
-                                    nb_size_arcsec, pixscale)
+    nb_img = extract_pseudonb_image(cube, wmin, wmax, xpix, ypix, 3.0, pixscale)
 
     flux_smooth = gaussian_filter1d(flux, smooth_sigma)
     noise = np.sqrt(var)
@@ -177,26 +179,24 @@ def plot_test(
     ax1.plot(wave, flux_smooth, color="crimson", lw=1.8, label="Smoothed")
 
     ax1.axhline(0.0, color="k", ls="--", lw=0.8)
-    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3, label="NB window")
-    ax1.axvline(nb_wave, color="orange", ls="--", lw=2.0, label="NB centre")
+    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3)
+    ax1.axvline(search_min, color="royalblue", ls=":", lw=1.5, label="search min")
+    ax1.axvline(search_max, color="royalblue", ls=":", lw=1.5, label="search max")
+    ax1.axvline(lya_obs, color="orange", ls="--", lw=2.0, label="lya(spec)")
 
     ax1.set_xlabel("Wavelength [\u00c5]")
     ax1.set_ylabel(r"Flux [$10^{-20}$ erg s$^{-1}$ cm$^{-2}$ \u00c5$^{-1}$]")
     ax1.legend(fontsize=9, frameon=False)
-    ax1.set_title(
-        f"Source {source_id} | RA={ra:.5f} Dec={dec:.5f} | "
-        f"dx={dx_arcsec:+.2f}\" dy={dy_arcsec:+.2f}\" | "
-        f"peak S/N={peak_snr:.2f}"
-    )
+    ax1.set_title(f"Source {source_id} | RA={ra:.5f} | Dec={dec:.5f}")
 
     ax2.imshow(nb_img, origin="lower", cmap="inferno")
-    half_pix = (nb_size_arcsec / pixscale) / 2.0
+    half_pix = (3.0 / pixscale) / 2.0
     r_pix = aperture_arcsec / pixscale
     ax2.add_patch(Circle((half_pix, half_pix), r_pix,
                          edgecolor="cyan", facecolor="none", lw=2.0))
     ax2.set_xticks([])
     ax2.set_yticks([])
-    ax2.set_title(f"Pseudo-NB @ {nb_wave} \u00c5")
+    ax2.set_title("Pseudo-NB")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
@@ -210,45 +210,42 @@ def plot_test(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Test spectrum + NB extraction with manual position and wavelength."
+        description="Reproduce the pipeline single-source flux + pseudo-NB "
+                    "figure, with optional position and line-centre overrides."
     )
 
-    p.add_argument("--id", type=int, required=True,
-                   help="Source ID to process")
-    p.add_argument("--cube-dir", required=True,
+    p.add_argument("--id", type=int, required=True, help="Source ID to process")
+
+    p.add_argument("--indir",
+                   default="/ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts",
+                   help="Directory of extracted {ID}_spectrum.npz files")
+    p.add_argument("--catalog",
+                   default="/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv",
+                   help="Catalogue with ID, ra, dec, z_av columns")
+    p.add_argument("--cube-dir",
+                   default="/ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/",
                    help="Directory of continuum-subtracted line cubes")
-    p.add_argument("--catalog", required=True,
-                   help="Catalogue with ID, ra, dec columns")
 
-    p.add_argument("--nb-wave", type=int, required=True,
-                   help="Observed wavelength (integer AA) to centre the NB / window on")
+    # Overrides. When omitted the pipeline value is used and the figure reproduces.
+    p.add_argument("--dx", type=float, default=None,
+                   help="Override dx offset (arcsec). Default: pipeline value.")
+    p.add_argument("--dy", type=float, default=None,
+                   help="Override dy offset (arcsec). Default: pipeline value.")
+    p.add_argument("--linecenter", type=float, default=None,
+                   help="Override the NB / best-centre wavelength (AA). "
+                        "Default: sliding-S/N peak inside lya_obs +/- half-width.")
 
-    p.add_argument("--dx-arcsec", type=float, default=0.0,
-                   help="Spatial offset in RA direction (arcsec), default 0")
-    p.add_argument("--dy-arcsec", type=float, default=0.0,
-                   help="Spatial offset in Dec direction (arcsec), default 0")
-
-    p.add_argument("--window-width", type=float, default=10.0,
-                   help="NB / S/N window width (AA), default 10")
-    p.add_argument("--extract-window", type=float, default=35.0,
-                   help="Half-width of the spectral extraction window around "
-                        "--nb-wave (AA). Default 35 matches the pipeline.")
-
-    p.add_argument("--match-pipeline", action="store_true",
-                   help="Report the smoothed sliding-window peak S/N (as "
-                        "sliding_snr_lya_grating.py does) instead of the raw "
-                        "single-window S/N. Slides across the extraction window, "
-                        "smooths the S/N curve with gaussian_filter1d(sigma=2), "
-                        "and takes the max.")
-    p.add_argument("--step", type=float, default=1.0,
-                   help="Sliding window step (AA), only used with "
-                        "--match-pipeline. Default 1.")
-
+    # Pipeline parameters, defaulted to match the pipeline exactly.
     p.add_argument("--id-col", default="ID")
+    p.add_argument("--z-col", default="z_av")
     p.add_argument("--aperture", type=float, default=0.6)
     p.add_argument("--pixscale", type=float, default=0.2)
-    p.add_argument("--nb-size", type=float, default=3.0,
-                   help="Pseudo-NB cutout size (arcsec), default 3.0")
+    p.add_argument("--half-width", type=float, default=35.0,
+                   help="Half-width of the peak search window around lya_obs (AA)")
+    p.add_argument("--window-width", type=float, default=10.0,
+                   help="Sliding integration window width (AA)")
+    p.add_argument("--step", type=float, default=1.0,
+                   help="Sliding window step (AA)")
     p.add_argument("--data-ext", type=int, default=1)
     p.add_argument("--var-ext", type=int, default=2)
 
@@ -266,124 +263,140 @@ def parse_args():
 def main():
     args = parse_args()
 
-    cube_dir = os.path.abspath(args.cube_dir)
+    indir = os.path.abspath(args.indir)
     catalog_path = os.path.abspath(args.catalog)
+    cube_dir = os.path.abspath(args.cube_dir)
     figdir = os.path.abspath(args.figdir)
     os.makedirs(figdir, exist_ok=True)
 
+    idx = int(args.id)
+    override = (args.dx is not None) or (args.dy is not None) or (args.linecenter is not None)
+
     print("[PATHS]")
-    print(f"  Cube directory   : {cube_dir}")
-    print(f"  Catalogue        : {catalog_path}")
-    print(f"  Figure directory : {figdir}")
+    print(f"  Spectra directory : {indir}")
+    print(f"  Catalogue         : {catalog_path}")
+    print(f"  Cube directory    : {cube_dir}")
+    print(f"  Figure directory  : {figdir}")
     print("")
 
+    # ---- Catalogue (ra0, dec0, z_av) ----
     catalog = pd.read_csv(catalog_path)
-    for col in (args.id_col, "ra", "dec"):
+    for col in (args.id_col, "ra", "dec", args.z_col):
         if col not in catalog.columns:
             raise KeyError(
-                f"Column '{col}' not found in catalogue. Available: {list(catalog.columns)}"
+                f"Column '{col}' not in catalogue. Available: {list(catalog.columns)}"
             )
     catalog[args.id_col] = catalog[args.id_col].astype("Int64")
     catalog = catalog.set_index(args.id_col)
-
-    idx = int(args.id)
     if idx not in catalog.index:
         raise KeyError(f"Src {idx} not in catalogue")
 
     ra0 = float(catalog.loc[idx, "ra"])
     dec0 = float(catalog.loc[idx, "dec"])
+    z_av = float(catalog.loc[idx, args.z_col])
+    lya_obs = z_to_wavelength(z_av).value
 
-    cube_path = os.path.join(
-        cube_dir, f"source_{idx}_lya_contsub_cube_velocity.fits"
-    )
+    # ---- Load the stored pipeline spectrum ----
+    npz_path = os.path.join(indir, f"{idx}_spectrum.npz")
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"Spectrum not found at {npz_path}")
+    npz = np.load(npz_path)
+    wave_ref = npz["wave"]
+    dx_pipe = float(npz["dx"])
+    dy_pipe = float(npz["dy"])
+
+    # Cube (needed for the pseudo-NB, and for re-extraction if overriding)
+    cube_path = os.path.join(cube_dir, f"source_{idx}_lya_contsub_cube_velocity.fits")
     if not os.path.exists(cube_path):
         raise FileNotFoundError(f"Cube not found at {cube_path}")
-
     cube = load_cube(cube_path, args.data_ext, args.var_ext)
 
-    # Apply the requested spatial offset in sky coordinates, same as the pipeline
-    ra, dec = shift_radec(ra0, dec0, args.dx_arcsec, args.dy_arcsec)
-    xpix, ypix = coords_to_pixel(cube, ra, dec)
+    # ---- Resolve offsets ----
+    dx = dx_pipe if args.dx is None else args.dx
+    dy = dy_pipe if args.dy is None else args.dy
+    dx_src = "pipeline (npz)" if args.dx is None else "override"
+    dy_src = "pipeline (npz)" if args.dy is None else "override"
+
+    ra, dec = shift_radec(ra0, dec0, dx, dy)
+
+    if not override:
+        # Exact reproduction: use the stored spectrum as-is.
+        wave = wave_ref
+        flux = npz["flux"]
+        var = npz["var"]
+        mode = "reproduce (stored npz)"
+    else:
+        # Re-extract at the new position, over the SAME wavelength bounds as the
+        # stored spectrum, so the sliding-centre grid stays aligned.
+        xpix_e, ypix_e = coords_to_pixel(cube, ra, dec)
+        wave, flux, var = extract_1d_spectrum_with_var(
+            cube, xpix_e, ypix_e,
+            args.aperture, args.pixscale,
+            float(wave_ref.min()), float(wave_ref.max()),
+        )
+        mode = "override (re-extracted, grid-aligned)"
+        if len(wave) != len(wave_ref) or not np.allclose(wave, wave_ref):
+            print("[WARN] Re-extracted wavelength grid differs from stored npz. "
+                  "S/N may not be directly comparable.")
+
+    # ---- Sliding S/N exactly as sliding_snr_lya_grating.py ----
+    search_min = lya_obs - args.half_width
+    search_max = lya_obs + args.half_width
+
+    wave_centers, snr_vals = sliding_snr(
+        wave, flux, var,
+        window_width=args.window_width, step=args.step,
+    )
+    snr_smooth = smooth_snr_optimal(snr_vals)
+
+    smask = (wave_centers >= search_min) & (wave_centers <= search_max)
+    if not np.any(smask):
+        raise ValueError("Search window falls outside the spectrum")
+
+    imax = np.argmax(snr_smooth[smask])
+    best_center_auto = wave_centers[smask][imax]
+    peak_snr = snr_smooth[smask][imax]
+
+    if args.linecenter is not None:
+        best_center = float(args.linecenter)
+        bc_src = "override"
+    else:
+        best_center = best_center_auto
+        bc_src = "sliding-S/N peak"
+
+    # ---- Pixel for the pseudo-NB (float, as in sliding_snr_lya_grating.py) ----
+    ypix, xpix = cube.wcs.sky2pix([[dec, ra]], unit="deg")[0]
 
     print("[POSITION]")
     print(f"  Catalogue RA/Dec : {ra0:.6f}, {dec0:.6f}")
-    print(f"  Offset applied   : dx={args.dx_arcsec:+.2f}\" dy={args.dy_arcsec:+.2f}\"")
+    print(f"  z_av             : {z_av:.5f}  ->  Lya(spec) = {lya_obs:.2f} AA")
+    print(f"  dx applied       : {dx:+.3f}\"  ({dx_src})")
+    print(f"  dy applied       : {dy:+.3f}\"  ({dy_src})")
     print(f"  Shifted RA/Dec   : {ra:.6f}, {dec:.6f}")
-    print(f"  Extraction pixel : x={xpix}, y={ypix}")
+    print(f"  Mode             : {mode}")
     print("")
-
-    # Spectral extraction window around the chosen NB wavelength
-    wmin_ext = args.nb_wave - args.extract_window
-    wmax_ext = args.nb_wave + args.extract_window
-
-    wave, flux, var = extract_1d_spectrum_with_var(
-        cube, xpix, ypix,
-        args.aperture, args.pixscale,
-        wmin_ext, wmax_ext,
-    )
-
-    # Raw single-window S/N at exactly the selected NB window
-    half = args.window_width / 2.0
-    wmin, wmax = args.nb_wave - half, args.nb_wave + half
-    f = integrate_flux(wave, flux, (wmin, wmax))
-    e = integrate_flux_error(wave, var, (wmin, wmax))
-    snr_single = line_snr(f, e)
-
-    # Pipeline-matched smoothed sliding peak S/N over the extraction window
-    wave_centers, snr_vals = sliding_snr(
-        wave, flux, var,
-        window_width=args.window_width, step=args.step
-    )
-    snr_smooth = smooth_snr_optimal(snr_vals)
-    if len(snr_smooth) > 0 and np.any(np.isfinite(snr_smooth)):
-        imax = np.nanargmax(snr_smooth)
-        snr_pipeline = snr_smooth[imax]
-        center_pipeline = wave_centers[imax]
-    else:
-        snr_pipeline = np.nan
-        center_pipeline = np.nan
-
-    # Which one drives the reported peak_snr and the plot title
-    if args.match_pipeline:
-        peak_snr = snr_pipeline
-    else:
-        peak_snr = snr_single
-
-    print("[EXTRACTION WINDOW]")
-    print(f"  Centre           : {args.nb_wave} \u00c5")
-    print(f"  Half-width       : {args.extract_window} \u00c5  "
-          f"({wmin_ext:.1f} to {wmax_ext:.1f})")
-    print(f"  N pixels in spec : {len(wave)}")
-    print("")
-    print("[NB / S/N WINDOW]")
-    print(f"  Centre           : {args.nb_wave} \u00c5")
-    print(f"  Width            : {args.window_width} \u00c5  ({wmin:.1f} to {wmax:.1f})")
-    print(f"  Integrated flux  : {f:.4g}")
-    print(f"  Flux error       : {e:.4g}")
-    print("")
-    print("[S/N COMPARISON]")
-    print(f"  Single-window (raw)      : {snr_single:.2f}  at {args.nb_wave} \u00c5")
-    print(f"  Pipeline (slide+smooth)  : {snr_pipeline:.2f}  at {center_pipeline:.1f} \u00c5")
-    mode = "pipeline (slide+smooth)" if args.match_pipeline else "single-window (raw)"
-    print(f"  Reported peak S/N        : {peak_snr:.2f}  [{mode}]")
+    print("[DETECTION]")
+    print(f"  Search window    : {search_min:.1f} to {search_max:.1f} AA")
+    print(f"  Peak S/N         : {peak_snr:.4f}")
+    print(f"  Sliding peak at  : {best_center_auto:.2f} AA")
+    print(f"  NB centre used   : {best_center:.2f} AA  ({bc_src})")
+    print(f"  Lya(spec) at     : {lya_obs:.2f} AA  (systemic, yellow)")
     print("")
 
     out_path = os.path.join(figdir, f"{idx}_test.png")
-    plot_test(
+    plot_flux_with_pseudonb(
         wave, flux, var,
-        args.nb_wave, args.window_width,
+        best_center, args.window_width,
         cube, xpix, ypix,
         args.aperture, args.pixscale,
         ra, dec, idx,
-        args.dx_arcsec, args.dy_arcsec,
-        peak_snr,
-        args.nb_size,
-        out_path
+        lya_obs, search_min, search_max,
+        out_path,
     )
 
     print("[DONE]")
-    print(f"  Reported peak S/N = {peak_snr:.2f}  [{mode}]")
-    print(f"  Image written to: {out_path}")
+    print(f"  Reported peak S/N = {peak_snr:.4f}")
+    print(f"  Image written to  : {out_path}")
 
 
 if __name__ == "__main__":
@@ -391,22 +404,12 @@ if __name__ == "__main__":
 
 
 """
-default extraction (no offset, standard 10 AA S/N window)
-python spec_nb_test.py \
-  --id 15479 \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
-  --nb-wave 5800
+Reproduce the pipeline figure and S/N for one source (reads the stored npz)
+python spec_nb_single.py --id 18502
 
-shift the extraction position and widen the S/N window
-python spec_nb_test.py \
-  --id 15479 \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
-  --nb-wave 5800 \
-  --dx-arcsec 0.2 --dy-arcsec -0.1 \
-  --window-width 10
-  --extract-window 150
-  --match-pipeline
+Explore a wider spatial offset than the grid allowed (re-extracts, grid-aligned)
+python spec_nb_single.py --id 18502 --dx -0.6 --dy -0.1
 
+Force a specific NB / best-centre wavelength
+python spec_nb_single.py --id 18502 --linecenter 5323
 """
