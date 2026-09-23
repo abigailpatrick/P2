@@ -1,0 +1,19 @@
+=======================================
+MC error task 22 (job 10519676)
+Node: worker088  started: Wed 23 Sep 15:15:59 BST 2026
+=======================================
+[CONFIG]
+  Spectra directory : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts
+  Sliding-S/N CSV   : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv
+  Catalogue         : /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv
+  Properties CSV    : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv
+  Output CSV        : /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row22.csv
+  mode = model, N = 500, seed = 42
+
+[INFO] 82 successfully-fitted sources to bootstrap
+[INFO] SLURM array mode: processing row 22 (ID 38195) only
+
+  ID 38195: dv_err = 85.9 km/s (Lya 83.2, sys 21.3), 496/500 fits converged
+
+[INFO] written partial /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row22.csv
+Task 22 finished at: Wed 23 Sep 15:19:19 BST 2026

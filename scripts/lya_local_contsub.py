@@ -6,9 +6,11 @@ Local median-filter continuum subtraction for the JELS MUSE subcubes.
 
 Adapted from the original megacube-extraction pipeline to run on the
 per-source subcubes named  subcube_JELSID_<ID>.fits, keyed by the 'ID'
-column of the input CSV. The source redshift is read from 'z_av' and the
-continuum-exclusion mask defaults to velocity mode at +/-400 km/s about the
-observed Lya wavelength.
+column of the input CSV. The source redshift is read from 'z_sys' (falling
+back to 'z_dja' where z_sys is blank), and the continuum-exclusion mask
+defaults to an ASYMMETRIC velocity window about the observed Lya wavelength:
+narrow on the blue side and wide on the red side, since Lya escaping an
+expanding medium emerges redward of systemic.
 
 For each source the script builds a spectral mask, estimates a per-spaxel
 continuum by median filtering with interpolation across the mask and any
@@ -43,10 +45,16 @@ def z_to_lya_obs(z):
     return (LYA_REST * (1 + z)).value  # Angstrom
 
 
-def velocity_mask(wave, lya_obs, dv_kms=400):
-    """Boolean mask, True within +/-dv_kms of lya_obs."""
+def velocity_mask(wave, lya_obs, dv_blue=300, dv_red=1200):
+    """Boolean mask, True inside the asymmetric velocity window about lya_obs.
+
+    dv is measured relative to the observed Lya wavelength, so dv < 0 is
+    blueward (shorter wavelength) and dv > 0 is redward (longer wavelength).
+    The window spans -dv_blue to +dv_red, allowing a wide red tail to cover
+    Lya offsets while keeping the blue side tight.
+    """
     dv = C_KMS * (wave - lya_obs) / lya_obs
-    return np.abs(dv) < dv_kms
+    return (dv > -dv_blue) & (dv < dv_red)
 
 
 def zrange_mask(wave, z_min, z_max, buffer_A=5.0):
@@ -60,12 +68,12 @@ def zrange_mask(wave, z_min, z_max, buffer_A=5.0):
 
 def build_mask(wave, mask_mode, lya_obs=None,
                z_min=None, z_max=None,
-               dv_mask=400, buffer_A=5.0):
+               dv_blue=300, dv_red=1200, buffer_A=5.0):
     """Construct the continuum-exclusion mask for the chosen mode.
 
     mask_mode:
       'none'     -> no channels excluded (all False)
-      'velocity' -> exclude +/-dv_mask km/s around lya_obs (default here)
+      'velocity' -> exclude -dv_blue to +dv_red km/s around lya_obs (default)
       'zrange'   -> exclude z_min(-buffer) to z_max(+buffer) in Lya-obs space
     """
     if mask_mode == "none":
@@ -74,7 +82,7 @@ def build_mask(wave, mask_mode, lya_obs=None,
     if mask_mode == "velocity":
         if lya_obs is None:
             raise ValueError("velocity mask requires lya_obs")
-        return velocity_mask(wave, lya_obs, dv_kms=dv_mask)
+        return velocity_mask(wave, lya_obs, dv_blue=dv_blue, dv_red=dv_red)
 
     if mask_mode == "zrange":
         if z_min is None or z_max is None:
@@ -148,7 +156,8 @@ def median_continuum_cube(cube, lya_mask, window_pix=101):
     return cont, line
 
 
-def plot_QA(cube, cont, line, lya_obs, source_id, outdir, mode_tag):
+def plot_QA(cube, cont, line, lya_obs, source_id, outdir, mode_tag,
+            dv_blue=None, dv_red=None):
     """QA plot using spatially summed spectra."""
     wave = cube.wave.coord()
 
@@ -160,7 +169,14 @@ def plot_QA(cube, cont, line, lya_obs, source_id, outdir, mode_tag):
     plt.plot(wave, spec, color="0.6", label="Original")
     plt.plot(wave, cont_spec, color="r", label="Median continuum")
     plt.plot(wave, line_spec, color="k", label="Continuum-subtracted")
-    plt.axvline(lya_obs, color="b", ls="--", label="Lya")
+    plt.axvline(lya_obs, color="b", ls="--", label="Lya (systemic)")
+
+    if dv_blue is not None and dv_red is not None:
+        w_blue = lya_obs * (1 - dv_blue / C_KMS)
+        w_red = lya_obs * (1 + dv_red / C_KMS)
+        plt.axvspan(w_blue, w_red, color="b", alpha=0.08,
+                    label=f"mask (-{dv_blue:.0f}/+{dv_red:.0f} km/s)")
+
     plt.xlabel("Wavelength [Angstrom]")
     plt.ylabel("Flux *10**-20")
     plt.title(f"Source {source_id}: median-filter continuum subtraction ({mode_tag})")
@@ -211,7 +227,7 @@ def process_source(cube_path, z, source_id, outdir,
                    mask_mode="velocity",
                    z_min=None, z_max=None,
                    window_pix=101,
-                   dv_mask=400,
+                   dv_blue=300, dv_red=1200,
                    buffer_A=5.0,
                    make_plot=True):
 
@@ -223,13 +239,13 @@ def process_source(cube_path, z, source_id, outdir,
         wave, mask_mode,
         lya_obs=lya_obs,
         z_min=z_min, z_max=z_max,
-        dv_mask=dv_mask, buffer_A=buffer_A,
+        dv_blue=dv_blue, dv_red=dv_red, buffer_A=buffer_A,
     )
 
     n_masked = int(lya_mask.sum())
     if mask_mode == "velocity":
-        print(f"[MASK] {mask_mode}: +/-{dv_mask:.0f} km/s about {lya_obs:.2f} A "
-              f"({n_masked} channels excluded)")
+        print(f"[MASK] {mask_mode}: -{dv_blue:.0f}/+{dv_red:.0f} km/s about "
+              f"{lya_obs:.2f} A ({n_masked} channels excluded)")
     elif mask_mode == "zrange":
         lo = z_to_lya_obs(z_min) - buffer_A
         hi = z_to_lya_obs(z_max) + buffer_A
@@ -245,7 +261,9 @@ def process_source(cube_path, z, source_id, outdir,
     )
 
     if make_plot:
-        plot_QA(cube, cont, line, lya_obs, source_id, outdir, mask_mode)
+        plot_QA(cube, cont, line, lya_obs, source_id, outdir, mask_mode,
+                dv_blue=dv_blue if mask_mode == "velocity" else None,
+                dv_red=dv_red if mask_mode == "velocity" else None)
 
     cont_cube = cube.copy()
     line_cube = cube.copy()
@@ -292,12 +310,19 @@ def main():
     parser.add_argument("--mask_mode", choices=["none", "velocity", "zrange"],
                         default="velocity",
                         help="Continuum-exclusion mode (default velocity).")
-    parser.add_argument("--dv_mask", type=float, default=400,
-                        help="Half-width in km/s for velocity mode (default 400).")
+    parser.add_argument("--dv_blue", type=float, default=300,
+                        help="Blue half-width in km/s for velocity mode "
+                             "(default 300).")
+    parser.add_argument("--dv_red", type=float, default=1200,
+                        help="Red half-width in km/s for velocity mode "
+                             "(default 1200).")
     parser.add_argument("--buffer_A", type=float, default=5.0,
                         help="Buffer in Angstrom per side for zrange mode.")
-    parser.add_argument("--zcol", default="z_av",
-                        help="CSV column holding the redshift (default z_av).")
+    parser.add_argument("--zcol", default="z_sys",
+                        help="CSV column holding the redshift (default z_sys).")
+    parser.add_argument("--zcol_fallback", default="z_dja",
+                        help="CSV column used where zcol is blank/non-finite "
+                             "(default z_dja). Set to '' to disable fallback.")
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
@@ -305,6 +330,12 @@ def main():
     for col in ("ID", args.zcol):
         if col not in df.columns:
             raise SystemExit(f"CSV missing required column '{col}'.")
+
+    use_fallback = bool(args.zcol_fallback)
+    if use_fallback and args.zcol_fallback not in df.columns:
+        raise SystemExit(
+            f"CSV missing fallback column '{args.zcol_fallback}'. "
+            f"Pass --zcol_fallback '' to disable the fallback.")
 
     # Select rows by ID, or all rows.
     if args.source is not None:
@@ -317,10 +348,20 @@ def main():
 
     for _, row in rows.iterrows():
         sid = format_id(row["ID"])
-        z = row[args.zcol]
 
-        if not np.isfinite(float(z)):
-            print(f"[WARN] Source {sid}: non-finite {args.zcol}, skipping.")
+        z = pd.to_numeric(row[args.zcol], errors="coerce")
+
+        if not np.isfinite(z) and use_fallback:
+            z_fb = pd.to_numeric(row[args.zcol_fallback], errors="coerce")
+            if np.isfinite(z_fb):
+                print(f"[INFO] Source {sid}: {args.zcol} blank, "
+                      f"falling back to {args.zcol_fallback}={z_fb:.4f}.")
+                z = z_fb
+
+        if not np.isfinite(z):
+            print(f"[WARN] Source {sid}: no finite {args.zcol}"
+                  f"{' or ' + args.zcol_fallback if use_fallback else ''}, "
+                  f"skipping.")
             continue
 
         # zrange columns kept optional, only used if mask_mode is zrange.
@@ -346,7 +387,8 @@ def main():
             z_min=z_min,
             z_max=z_max,
             window_pix=args.window,
-            dv_mask=args.dv_mask,
+            dv_blue=args.dv_blue,
+            dv_red=args.dv_red,
             buffer_A=args.buffer_A,
         )
 
@@ -357,19 +399,20 @@ if __name__ == "__main__":
 
 
 """
-Velocity mask (+/-400 km/s about Lya at z_av), all sources:
+Asymmetric velocity mask (-300/+1200 km/s about Lya at z_sys, z_dja
+fallback), all sources:
 python lya_local_contsub.py \
-  --mask_mode velocity --dv_mask 400 \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --mask_mode velocity --dv_blue 300 --dv_red 1200 \
+  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
   --cube_dir /cephfs/apatrick/P2/MUSE_subcubes/ \
   --outdir /cephfs/apatrick/P2/MUSE_subcubes/contsub
 
 Single source by ID:
 python lya_local_contsub.py \
-  --source 16871 --mask_mode velocity --dv_mask 400 \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --source 16871 --mask_mode velocity --dv_blue 300 --dv_red 1200 \
+  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
   --cube_dir /cephfs/apatrick/P2/MUSE_subcubes/ \
   --outdir /cephfs/apatrick/P2/MUSE_subcubes/contsub
 
-  
+
 """

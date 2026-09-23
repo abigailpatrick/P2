@@ -6,10 +6,12 @@ MUSE cubes, adapted for P2 grating (spectroscopic) sources.
 Differences from the P1 photometric version:
   - Cubes are keyed on the catalogue ID column, path pattern
     source_{ID}_continuum_cube_velocity.fits
-  - z_av is the spectroscopic redshift. There is no spectral scan.
-    The extraction window is fixed at z_av mapped to observed Lya, +/- a fixed
-    half-width (default 35 AA, the average spectroscopic search half-width from
-    Patrick et al. 2026, Section 3.3.2).
+  - z_sys is the systemic (spectroscopic) redshift, falling back to z_dja where
+    z_sys is blank. There is no spectral scan.
+    The S/N search window is fixed to the asymmetric velocity band about the
+    observed systemic Lya wavelength: -dv_blue to +dv_red km/s (default
+    -300/+1200), matching the continuum-subtraction mask. This tracks the region
+    where Lya could physically fall, narrow to the blue and wide to the red.
   - Only the spatial position (dx, dy) is optimised, with a Gaussian positional
     prior centred on the JWST position.
 """
@@ -24,11 +26,37 @@ from scipy.ndimage import gaussian_filter1d
 import astropy.units as u
 
 LYA_REST = 1215.67  # AA
+C_KMS = 299792.458
 
 
 # ============================================================
 # Utilities
 # ============================================================
+
+def resolve_redshift(row, zcol, zcol_fallback):
+    """Return a finite redshift from zcol, else zcol_fallback, else NaN.
+
+    Returns (z, source_tag) where source_tag names which column was used.
+    """
+    z = pd.to_numeric(row.get(zcol), errors="coerce")
+    if np.isfinite(z):
+        return float(z), zcol
+    if zcol_fallback:
+        z_fb = pd.to_numeric(row.get(zcol_fallback), errors="coerce")
+        if np.isfinite(z_fb):
+            return float(z_fb), zcol_fallback
+    return np.nan, None
+
+
+def velocity_band(lya_obs, dv_blue, dv_red):
+    """Observed-frame wavelength edges of the asymmetric velocity band.
+
+    dv_blue and dv_red are positive km/s half-widths to the blue and red of
+    systemic. Returns (wmin, wmax) in Angstrom.
+    """
+    wmin = lya_obs * (1.0 - dv_blue / C_KMS)
+    wmax = lya_obs * (1.0 + dv_red / C_KMS)
+    return wmin, wmax
 
 def shift_radec(ra_deg, dec_deg, dx_arcsec=0.0, dy_arcsec=0.0):
     d_ra = dx_arcsec / 3600.0 / np.cos(np.deg2rad(dec_deg))
@@ -112,13 +140,16 @@ def peak_snr_in_range(wave, flux, var, wmin, wmax, window_width=10.0, step=1.0):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--csv", required=True,
-                   help="Catalogue with ID, ra, dec, z_av columns")
+                   help="Catalogue with ID, ra, dec, z_sys columns")
     p.add_argument("--cube-dir", required=True,
                    help="Directory holding source_{ID}_continuum_cube_velocity.fits")
     p.add_argument("--id-col", default="ID",
                    help="Name of the ID column in the catalogue")
-    p.add_argument("--z-col", default="z_av",
-                   help="Name of the spectroscopic redshift column")
+    p.add_argument("--z-col", default="z_sys",
+                   help="Name of the systemic redshift column (default z_sys)")
+    p.add_argument("--z-col-fallback", default="z_dja",
+                   help="Column used where z-col is blank/non-finite "
+                        "(default z_dja). Set to '' to disable.")
 
     p.add_argument("--aperture", type=float, default=0.6,
                    help="Extraction aperture radius (arcsec)")
@@ -130,10 +161,12 @@ def main():
     p.add_argument("--dx-step", type=float, default=0.1,
                    help="Spatial grid step (arcsec)")
 
-    p.add_argument("--half-width", type=float, default=35.0,
-                   help="Fixed observed-frame half-width of the Lya search "
-                        "window around z_av (AA). Paper uses ~35 AA for "
-                        "spectroscopic sources.")
+    p.add_argument("--dv-blue", type=float, default=300.0,
+                   help="Blue half-width of the Lya S/N search band (km/s), "
+                        "measured from systemic. Default 300, matches contsub.")
+    p.add_argument("--dv-red", type=float, default=1200.0,
+                   help="Red half-width of the Lya S/N search band (km/s), "
+                        "measured from systemic. Default 1200, matches contsub.")
 
     p.add_argument("--prior-scale", type=float, default=1.0,
                    help="Gaussian positional prior sigma (arcsec)")
@@ -160,18 +193,31 @@ def main():
                 f"Column '{col}' not found. Available columns: {list(df.columns)}"
             )
 
+    use_fallback = bool(args.z_col_fallback)
+    if use_fallback and args.z_col_fallback not in df.columns:
+        raise KeyError(
+            f"Fallback column '{args.z_col_fallback}' not found. "
+            f"Pass --z-col-fallback '' to disable. Available: {list(df.columns)}"
+        )
+
     offsets = np.arange(-args.dx_max, args.dx_max + args.dx_step, args.dx_step)
     rows = []
 
     for _, row in df.iterrows():
         idx = int(row[args.id_col])
         ra0, dec0 = row["ra"], row["dec"]
-        z_av = row[args.z_col]
 
-        # Fixed observed-frame window around the spectroscopic Lya position
-        lya_centre = z_to_wavelength(z_av).value
-        lya_wmin = lya_centre - args.half_width
-        lya_wmax = lya_centre + args.half_width
+        z, z_src = resolve_redshift(row, args.z_col, args.z_col_fallback)
+        if not np.isfinite(z):
+            print(f"[SKIP] Src {idx}: no finite {args.z_col}"
+                  f"{' or ' + args.z_col_fallback if use_fallback else ''}")
+            continue
+        if z_src != args.z_col:
+            print(f"[INFO] Src {idx}: {args.z_col} blank, using {z_src}={z:.4f}")
+
+        # Asymmetric velocity band about systemic Lya, matches the contsub mask
+        lya_centre = z_to_wavelength(z).value
+        lya_wmin, lya_wmax = velocity_band(lya_centre, args.dv_blue, args.dv_red)
 
         cube_path = os.path.join(
             cube_dir, f"source_{idx}_lya_contsub_cube_velocity.fits"
@@ -234,10 +280,11 @@ if __name__ == "__main__":
 
 """
 python optimize_lya_position_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
   --prior-scale 1.0 \
   --dx-max 0.4 \
   --dx-step 0.1 \
+  --dv-blue 300 --dv-red 1200 \
   --outfile /ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv
 """

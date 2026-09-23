@@ -1,0 +1,19 @@
+=======================================
+MC error task 2 (job 10519676)
+Node: worker097  started: Wed 23 Sep 15:13:59 BST 2026
+=======================================
+[CONFIG]
+  Spectra directory : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts
+  Sliding-S/N CSV   : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv
+  Catalogue         : /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv
+  Properties CSV    : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv
+  Output CSV        : /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row2.csv
+  mode = model, N = 500, seed = 42
+
+[INFO] 82 successfully-fitted sources to bootstrap
+[INFO] SLURM array mode: processing row 2 (ID 16853) only
+
+  ID 16853: dv_err = 110.1 km/s (Lya 66.1, sys 88.0), 494/500 fits converged
+
+[INFO] written partial /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row2.csv
+Task 2 finished at: Wed 23 Sep 15:17:54 BST 2026

@@ -1,0 +1,19 @@
+=======================================
+MC error task 60 (job 10519676)
+Node: worker097  started: Wed 23 Sep 15:17:59 BST 2026
+=======================================
+[CONFIG]
+  Spectra directory : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts
+  Sliding-S/N CSV   : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv
+  Catalogue         : /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv
+  Properties CSV    : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv
+  Output CSV        : /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row60.csv
+  mode = model, N = 500, seed = 42
+
+[INFO] 82 successfully-fitted sources to bootstrap
+[INFO] SLURM array mode: processing row 60 (ID 49296) only
+
+  ID 49296: dv_err = 40.3 km/s (Lya 40.2, sys 1.6), 500/500 fits converged
+
+[INFO] written partial /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row60.csv
+Task 60 finished at: Wed 23 Sep 15:18:07 BST 2026

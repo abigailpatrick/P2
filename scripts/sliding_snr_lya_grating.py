@@ -3,11 +3,14 @@
 Sliding-window Lya S/N measurement and diagnostic plots for P2 grating sources.
 
 Adapted from the P1 photometric version:
-  - Reads spectra written by ap_extract_specs_grating.py ({ID}_spectrum.npz)
-  - Keyed on the catalogue ID column (cast to int)
-  - z_av is the spectroscopic redshift; the peak search window is
-    z_av mapped to observed Lya +/- --half-width (default 35 AA), allowing a
-    small velocity offset from systemic.
+  - Reads spectra written by ap_extract_specs_grating.py ({ID}_spectrum.npz).
+    These now hold the FULL spectral axis, so the sliding S/N runs across the
+    whole spectrum and the peak search is restricted to the asymmetric velocity
+    band about systemic Lya.
+  - z_sys is the systemic redshift (falling back to z_dja where blank).
+  - The peak search band is read from the .npz (band_min, band_max), written by
+    the extractor as -dv_blue/+dv_red km/s about systemic (default -300/+1200).
+    Older .npz files without the band fall back to computing it from z_sys.
   - Cubes loaded with ext=(data_ext, var_ext) to avoid the mpdaf name collision.
   - Loops over all spectra by default; --id runs a single source.
 """
@@ -26,6 +29,30 @@ from scipy.ndimage import gaussian_filter1d
 from mpdaf.obj import Cube
 
 LYA_REST = 1215.67  # AA
+C_KMS = 299792.458
+
+
+# ============================================================
+# Redshift / band helpers
+# ============================================================
+
+def resolve_redshift(row, zcol, zcol_fallback):
+    """Return (z, source_tag) from zcol, else zcol_fallback, else (NaN, None)."""
+    z = pd.to_numeric(row.get(zcol), errors="coerce")
+    if np.isfinite(z):
+        return float(z), zcol
+    if zcol_fallback:
+        z_fb = pd.to_numeric(row.get(zcol_fallback), errors="coerce")
+        if np.isfinite(z_fb):
+            return float(z_fb), zcol_fallback
+    return np.nan, None
+
+
+def velocity_band(lya_obs, dv_blue, dv_red):
+    """Observed-frame edges (AA) of the asymmetric velocity band about lya_obs."""
+    wmin = lya_obs * (1.0 - dv_blue / C_KMS)
+    wmax = lya_obs * (1.0 + dv_red / C_KMS)
+    return wmin, wmax
 
 
 # ============================================================
@@ -99,7 +126,7 @@ def plot_snr_with_pseudonb(
     aperture_arcsec, pixscale,
     ra, dec, source_id,
     lya_obs, search_min, search_max,
-    output_path
+    output_path, plot_halfwidth=250.0
 ):
     half = window_width / 2.0
     wmin, wmax = best_center - half, best_center + half
@@ -114,12 +141,15 @@ def plot_snr_with_pseudonb(
     ax1.plot(wave_centers, snr_smooth, color="crimson", lw=1.8)
 
     ax1.axhline(0.0, color="k", ls="--", lw=0.8)
-    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3)
+    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3, label="peak window (10 \u00c5)")
 
     ax1.axvline(search_min, color="royalblue", ls=":", lw=1.5)
     ax1.axvline(search_max, color="royalblue", ls=":", lw=1.5)
-    ax1.axvline(lya_obs, color="orange", ls="--", lw=2.0)
+    ax1.axvline(lya_obs, color="orange", ls="--", lw=2.0,
+                label=r"Ly$\alpha$ ($z_{\rm sys}$)")
 
+    ax1.legend(fontsize=9, frameon=False, loc="upper right")
+    ax1.set_xlim(lya_obs - plot_halfwidth, lya_obs + plot_halfwidth)
     ax1.set_xlabel("Wavelength [\u00c5]")
     ax1.set_ylabel("S/N")
 
@@ -158,7 +188,7 @@ def plot_flux_with_pseudonb(
     aperture_arcsec, pixscale,
     ra, dec, source_id,
     lya_obs, search_min, search_max,
-    output_path, smooth_sigma=2
+    output_path, smooth_sigma=2, plot_halfwidth=250.0
 ):
     half = window_width / 2.0
     wmin, wmax = best_center - half, best_center + half
@@ -178,10 +208,26 @@ def plot_flux_with_pseudonb(
     ax1.plot(wave, flux_smooth, color="crimson", lw=1.8, label="Smoothed")
 
     ax1.axhline(0.0, color="k", ls="--", lw=0.8)
-    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3)
-    ax1.axvline(search_min, color="royalblue", ls=":", lw=1.5, label="search min")
-    ax1.axvline(search_max, color="royalblue", ls=":", lw=1.5, label="search max")
-    ax1.axvline(lya_obs, color="orange", ls="--", lw=2.0, label="lya(spec)")
+    ax1.axvspan(wmin, wmax, color="lightblue", alpha=0.3, label="peak window (10 \u00c5)")
+    ax1.axvline(search_min, color="royalblue", ls=":", lw=1.5)
+    ax1.axvline(search_max, color="royalblue", ls=":", lw=1.5)
+    ax1.axvline(lya_obs, color="orange", ls="--", lw=2.0,
+                label=r"Ly$\alpha$ ($z_{\rm sys}$)")
+
+    ax1.set_xlim(lya_obs - plot_halfwidth, lya_obs + plot_halfwidth)
+
+    # y-limits from the flux and noise within the plotted window only, so a
+    # bright feature far outside +/-plot_halfwidth does not squash the line
+    in_win = (wave >= lya_obs - plot_halfwidth) & (wave <= lya_obs + plot_halfwidth)
+    if np.any(in_win):
+        vals = np.concatenate([
+            flux_smooth[in_win], flux[in_win], noise[in_win], -noise[in_win],
+        ])
+        vals = vals[np.isfinite(vals)]
+        if vals.size:
+            lo, hi = np.nanmin(vals), np.nanmax(vals)
+            pad = 0.1 * (hi - lo) if hi > lo else 1.0
+            ax1.set_ylim(lo - pad, hi + pad)
 
     ax1.set_xlabel("Wavelength [\u00c5]")
     ax1.set_ylabel(r"Flux [$10^{-20}$ erg s$^{-1}$ cm$^{-2}$ \u00c5$^{-1}$]")
@@ -219,17 +265,28 @@ def parse_args():
     p.add_argument("--id", type=int, default=None,
                    help="Single source ID to process. If omitted, run all.")
     p.add_argument("--id-col", default="ID")
-    p.add_argument("--z-col", default="z_av")
+    p.add_argument("--z-col", default="z_sys")
+    p.add_argument("--z-col-fallback", default="z_dja",
+                   help="Column used where z-col is blank (default z_dja). "
+                        "Set to '' to disable.")
 
     p.add_argument("--window-width", type=float, default=10.0,
                    help="Sliding integration window width (AA)")
     p.add_argument("--step", type=float, default=1.0,
                    help="Sliding window step (AA)")
-    p.add_argument("--half-width", type=float, default=35.0,
-                   help="Half-width of the peak search window around z_av (AA)")
+    p.add_argument("--dv-blue", type=float, default=300.0,
+                   help="Blue half-width (km/s) of the peak search band, used "
+                        "only if the .npz lacks a recorded band. Default 300.")
+    p.add_argument("--dv-red", type=float, default=1200.0,
+                   help="Red half-width (km/s) of the peak search band, used "
+                        "only if the .npz lacks a recorded band. Default 1200.")
 
     p.add_argument("--aperture", type=float, default=0.6)
     p.add_argument("--pixscale", type=float, default=0.2)
+    p.add_argument("--plot-halfwidth", type=float, default=250.0,
+                   help="Half-width (AA) of the plotted x-axis window, centred "
+                        "on systemic Lya. Default 250. The extracted spectrum "
+                        "itself is unchanged, this only sets the plot xlim.")
     p.add_argument("--data-ext", type=int, default=1)
     p.add_argument("--var-ext", type=int, default=2)
 
@@ -270,6 +327,12 @@ def main():
             raise KeyError(
                 f"Column '{col}' not found in catalogue. Available: {list(catalog.columns)}"
             )
+    use_fallback = bool(args.z_col_fallback)
+    if use_fallback and args.z_col_fallback not in catalog.columns:
+        raise KeyError(
+            f"Fallback column '{args.z_col_fallback}' not found. "
+            f"Pass --z-col-fallback '' to disable. Available: {list(catalog.columns)}"
+        )
     catalog[args.id_col] = catalog[args.id_col].astype("Int64")
     catalog = catalog.set_index(args.id_col)
 
@@ -290,15 +353,26 @@ def main():
             print(f"[SKIP] Src {idx}: not in catalogue")
             continue
 
-        z = float(catalog.loc[idx, args.z_col])
+        z, z_src = resolve_redshift(catalog.loc[idx], args.z_col,
+                                    args.z_col_fallback)
+        if not np.isfinite(z):
+            print(f"[SKIP] Src {idx}: no finite {args.z_col}"
+                  f"{' or ' + args.z_col_fallback if use_fallback else ''}")
+            continue
+
         data = np.load(path)
         wave, flux, var = data["wave"], data["flux"], data["var"]
         lya_obs = float(data["lya_obs"])
         ra, dec = float(data["ra"]), float(data["dec"])
 
-        # Search window fixed to z_av +/- half-width, allowing small velocity offset
-        search_min = lya_obs - args.half_width
-        search_max = lya_obs + args.half_width
+        # Prefer the search band recorded by the extractor. Older .npz files
+        # without it fall back to computing the band from systemic here.
+        if "band_min" in data.files and "band_max" in data.files:
+            search_min = float(data["band_min"])
+            search_max = float(data["band_max"])
+        else:
+            search_min, search_max = velocity_band(
+                lya_obs, args.dv_blue, args.dv_red)
 
         wave_centers, snr_vals = sliding_snr(
             wave, flux, var,
@@ -332,7 +406,8 @@ def main():
             args.aperture, args.pixscale,
             ra, dec, idx,
             lya_obs, search_min, search_max,
-            os.path.join(figdir, f"{idx}_snr_pseudonb.png")
+            os.path.join(figdir, f"{idx}_snr_pseudonb.png"),
+            plot_halfwidth=args.plot_halfwidth,
         )
 
         plot_flux_with_pseudonb(
@@ -342,7 +417,8 @@ def main():
             args.aperture, args.pixscale,
             ra, dec, idx,
             lya_obs, search_min, search_max,
-            os.path.join(figdir, f"{idx}_flux_pseudonb.png")
+            os.path.join(figdir, f"{idx}_flux_pseudonb.png"),
+            plot_halfwidth=args.plot_halfwidth,
         )
 
         rows.append(dict(
@@ -366,14 +442,14 @@ run on all sources (no slurm needed)
 python sliding_snr_lya_grating.py \
   --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
   --aperture 0.6
 
 run on one source
 python sliding_snr_lya_grating.py \
   --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
   --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
+  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
   --id 15479 \
   --aperture 0.6
 """
