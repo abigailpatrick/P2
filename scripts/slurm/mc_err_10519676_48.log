@@ -2,3 +2,18 @@
 MC error task 48 (job 10519676)
 Node: worker092  started: Wed 23 Sep 15:17:30 BST 2026
 =======================================
+[CONFIG]
+  Spectra directory : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts
+  Sliding-S/N CSV   : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv
+  Catalogue         : /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv
+  Properties CSV    : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv
+  Output CSV        : /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row48.csv
+  mode = model, N = 500, seed = 42
+
+[INFO] 82 successfully-fitted sources to bootstrap
+[INFO] SLURM array mode: processing row 48 (ID 47736) only
+
+  ID 47736: dv_err = 209.7 km/s (Lya 209.7, sys 3.1), 483/500 fits converged
+
+[INFO] written partial /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row48.csv
+Task 48 finished at: Wed 23 Sep 15:28:13 BST 2026

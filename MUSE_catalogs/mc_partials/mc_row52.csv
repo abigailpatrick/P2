@@ -1,0 +1,2 @@
+n_mc_attempted,n_mc_success,lya_peak_repeat,lya_peak_err_mc,z_lya_err_mc,delta_v_err_lya_kms,delta_v_err_sys_kms,delta_v_err_kms,flux_fit_err_mc,fwhm_kms_err_mc,frac_alpha_at_bound,frac_sigma_at_bound,frac_mu_at_bound,ID
+500,499,5041.921832262575,1.9028481355516704,0.0015656832493478785,112.95717003851396,31.321415491445883,117.21925324577676,64.1994884302233,256.620927110212,0.6032064128256514,0.008016032064128256,0.006012024048096192,48146

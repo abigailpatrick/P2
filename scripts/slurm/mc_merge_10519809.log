@@ -1,0 +1,6 @@
+Merging MC partials at: Wed 23 Sep 15:30:00 BST 2026
+[INFO] merging 82 partial files from /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials
+[INFO] fitted sources expecting MC errors : 82
+[INFO] sources with a finite delta_v_err  : 82
+[DONE] written /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv
+Merge finished at: Wed 23 Sep 15:30:04 BST 2026

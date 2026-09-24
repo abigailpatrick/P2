@@ -1,0 +1,95 @@
+ID,gratings,Ha_G235M_success,Ha_G235H_success,Ha_G395M_success,Ha_G395H_success,Ha_success
+15479,G395H,,,,True,1
+15748,"G235M, G395M",False,,True,,1
+16853,"G235M, G395M",True,,False,,1
+16871,"G235H, G395H",,False,,False,0
+17058,"G235M, G235H, G395M, G395H",True,True,True,False,3
+17074,G395H,,,,False,0
+17086,"G235M, G395M",False,,True,,1
+17416,"G235H, G395H",,False,,False,0
+17578,"G235M, G235H, G395M",True,True,False,,2
+17806,G235H,,False,,,0
+17891,"G235M, G235H, G395M",True,True,False,,2
+18444,"G235H, G395H",,False,,True,1
+18502,G235H,,True,,,1
+18866,"G235M, G395M",True,,True,,2
+19650,"G235M, G395M",True,,False,,1
+19819,"G235M, G235H, G395M",True,True,False,,2
+19928,"G235H, G395H",,False,,False,0
+23341,"G235M, G235H, G395M",True,True,False,,2
+23887,"G235M, G235H, G395M",True,False,True,,2
+26580,"G235M, G235H, G395M",True,True,False,,2
+26999,G235H,,False,,,0
+27014,"G235M, G395M",False,,True,,1
+28600,"G235M, G395M",True,,False,,1
+29701,"G235H, G395M",,False,True,,1
+33361,"G235M, G235H, G395M",True,False,True,,2
+35799,"G235H, G395H",,False,,False,0
+38195,G235H,,False,,,0
+41512,G235H,,True,,,1
+42751,"G235H, G395H",,False,,False,0
+42812,G235M,True,,,,1
+42990,"G235M, G395M",True,,True,,2
+43129,"G235M, G395M",True,,True,,2
+43604,"G235M, G235H, G395M",True,False,False,,1
+43683,G235M,True,,,,1
+43713,"G235M, G235H, G395M",True,False,False,,1
+44361,G235M,True,,,,1
+44980,"G235M, G235H, G395H",True,False,,True,2
+45004,G235M,True,,,,1
+45443,G235M,True,,,,1
+45547,G395H,,,,True,1
+45677,"G235H, G395H",,False,,True,1
+45963,"G235H, G395H",,False,,False,0
+46008,G395H,,,,False,0
+46091,G235M,True,,,,1
+46212,G235H,,False,,,0
+46887,"G235H, G395H",,True,,False,1
+46979,G235H,,False,,,0
+47137,"G235H, G395H",,False,,True,1
+47218,"G235H, G395H",,False,,True,1
+47283,"G235H, G395H",,False,,True,1
+47549,"G235M, G235H, G395M, G395H",False,True,True,False,2
+47664,"G235M, G235H, G395M",True,True,True,,3
+47736,"G235M, G395M",True,,False,,1
+47750,"G235M, G235H, G395M",True,True,False,,2
+48086,G235H,,True,,,1
+48121,"G235M, G235H",True,False,,,1
+48146,G235M,True,,,,1
+48256,"G235H, G395H",,True,,False,1
+48525,G235M,True,,,,1
+48586,G235H,,False,,,0
+48648,G235M,True,,,,1
+48688,"G235H, G395H",,False,,True,1
+48744,"G235H, G395H",,False,,False,0
+49289,G235H,,False,,,0
+49296,G235H,,False,,,0
+49482,G235M,True,,,,1
+49540,G235M,True,,,,1
+49694,G235M,True,,,,1
+49726,G235H,,False,,,0
+49902,"G235M, G235H, G395M",True,True,False,,2
+49939,G235H,,False,,,0
+50654,G235M,True,,,,1
+50751,"G235M, G235H",True,True,,,2
+50966,"G235M, G235H, G395M",True,False,True,,2
+50970,G235H,,False,,,0
+51240,"G235H, G395H",,False,,True,1
+51579,"G235H, G395H",,False,,True,1
+52096,"G235H, G395H",,False,,True,1
+53792,G235H,,False,,,0
+53892,"G235M, G235H, G395H",True,False,,True,2
+53947,"G235M, G235H, G395H",True,False,,False,1
+54193,G235M,True,,,,1
+54521,G235M,False,,,,0
+54619,"G235M, G235H, G395M",True,False,True,,2
+54969,"G235M, G395M",False,,True,,1
+55418,G235M,True,,,,1
+56591,G235M,True,,,,1
+57111,G235M,True,,,,1
+57248,G235M,True,,,,1
+58782,"G235H, G395H",,False,,False,0
+59457,"G235M, G235H, G395M",True,True,False,,2
+59737,"G235M, G395M",True,,True,,2
+70850,"G235M, G235H, G395M",True,False,False,,1
+71380,"G235M, G235H, G395M, G395H",True,False,False,False,1
