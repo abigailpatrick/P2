@@ -1,0 +1,2 @@
+ID,z_sys_line,delta_v_kms,delta_v_err_kms,fwhm_kms,lya_snr,skew_pinned,dv_out_of_band,pass_zsys_is_OIII,pass_dv_positive,pass_dv_err<120,pass_fwhm>100,pass_snr>3,pass_not_pinned_or_oob,n_criteria_failed,tier,manual
+55418,,,,,0.0,False,False,False,False,False,False,False,False,6,bad,d
