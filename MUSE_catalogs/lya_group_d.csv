@@ -1,0 +1,15 @@
+ID,z_sys_line,delta_v_kms,delta_v_err_kms,fwhm_kms,lya_snr,skew_pinned,dv_out_of_band,pass_zsys_is_OIII,pass_dv_positive,pass_dv_err<120,pass_fwhm>100,pass_snr>3,pass_not_pinned_or_oob,n_criteria_failed,tier,manual
+48146,OIII,-489.2309004634309,117.2192532457713,480.8012773742,3.510288148845932,True,True,True,False,True,True,True,False,2,bronze,d
+18866,OIII,531.8030443265392,178.83132727902037,514.9124313343808,2.3296545804316,False,False,True,True,False,True,False,True,2,bronze,d
+47736,OIII,215.05553850955377,209.7249279766529,104.13041571689676,1.2323928692941233,False,False,True,True,False,True,False,True,2,bronze,d
+56591,OIII,114.9521920037214,277.8062833368796,504.6299370608617,1.7086126887767212,False,False,True,True,False,True,False,True,2,bronze,d
+54193,OIII,-252.33555560213784,18.47460094170139,64.79100688905375,2.8948339194197032,True,False,True,False,True,False,False,False,4,stone,d
+17891,Ha,-376.8014176157087,138.1142223646447,757.2370928168617,4.310987003327139,True,True,False,False,False,True,True,False,4,stone,d
+17578,OIII,-605.1939709825613,139.59132781374203,543.2252856884361,3.386820178353989,True,True,True,False,False,True,True,False,3,stone,d
+48086,Ha,4112.475556117917,148.67331031072672,496.46250891663504,2.5776604371298752,False,True,False,True,False,True,False,False,4,stone,d
+48256,OIII,-123.70762160974436,181.6197160967953,847.6466568425662,3.021882429264516,True,False,True,False,False,True,True,False,3,stone,d
+17416,,,,323.55243730547784,3.293785017077626,False,True,False,False,False,True,True,False,4,stone,d
+17806,,,,375.5293034986756,3.379000638807499,False,False,False,False,False,True,True,True,3,stone,d
+46008,,,,198.4215104080575,3.644271243822777,True,False,False,False,False,True,True,False,4,stone,d
+58782,,,,353.4550368350974,27.595624946948146,False,False,False,False,False,True,True,True,3,stone,d
+55418,,,,,0.0,False,False,False,False,False,False,False,False,6,bad,d

@@ -1,0 +1,7 @@
+ID,z_sys_line,delta_v_kms,delta_v_err_kms,fwhm_kms,lya_snr,skew_pinned,dv_out_of_band,pass_zsys_is_OIII,pass_dv_positive,pass_dv_err<120,pass_fwhm>100,pass_snr>3,pass_not_pinned_or_oob,n_criteria_failed,tier,manual
+17086,OIII,1244.7011485342475,82.91729906960776,401.5548483714051,4.058620057731863,False,True,True,True,True,True,True,False,1,silver,c
+45963,OIII,1389.607402778468,98.02288346873056,448.7792930246761,3.3959374028523097,False,True,True,True,True,True,True,False,1,silver,c
+48121,OIII,-189.37887959927704,28.837263648961525,119.96640468598572,2.8176163580689297,False,False,True,False,True,True,False,True,2,bronze,c
+50654,OIII,-230.175789371732,106.36399629143196,627.0116537398351,4.258685466026151,True,False,True,False,True,True,True,False,2,bronze,c
+42812,Ha,475.1684351070627,86.97918300357584,73.46043817409466,3.05400755135056,True,False,False,True,True,False,True,False,3,stone,c
+57111,OIII,825.3693310444842,264.3295277540579,142.49177180865365,2.8417049290031065,True,False,True,True,False,True,False,False,3,stone,c
