@@ -8,9 +8,20 @@ Reads
   lya_group_<tier>.csv   for tier in gold, silver, bronze, stone, bad. Each
                          row must carry a manual label a, b, c or d.
   delta_v_from_best_zsys_line.csv
-                         z_sys (for the summary histograms), merged on ID.
-  lya_properties_mc.csv  quality_reason (for the skew_pinned / dv OOB caption
-                         notes), merged on ID.
+                         z_sys, z_sys_line, delta_v_kms and its errors,
+                         merged on ID.
+  lya_properties_mc.csv  fwhm_int_kms, fwhm_obs_kms, fwhm_lsf_kms, resolved,
+                         skew_at_max, lya_snr, quality_reason, fit_success,
+                         merged on ID.
+
+Only the ID, tier and manual columns are taken from the tier CSVs. Every
+measured value is refreshed from the current pipeline outputs above, and the
+pass/fail criteria are re-evaluated with group_lya_sample.py's own
+evaluate_source. So after rerunning the LSF-corrected fit, MC and
+find_delta_v_from_best_zsys_line.py, this script picks up the corrected
+FWHM and Delta_v while keeping your by-eye labels. 'tier' is the tier the
+source had when you labelled it. 'tier_now' is the tier the current values
+would give.
   systemic_redshifts_by_JELS_ID.csv
                          grating of each source's chosen systemic line, so the
                          pairs PDF can find the right line-fit PNG.
@@ -27,8 +38,9 @@ The PDF builders and captions are imported from group_lya_sample.py, so the
 layout matches the tier PDFs exactly. Within each label, sources are ordered by
 original tier (gold first) and then by delta_v_err_kms.
 
-Note: rerunning group_lya_sample.py rewrites lya_group_<tier>.csv with an empty
-'manual' column. Back up the labelled CSVs before doing that.
+Note: group_lya_sample.py now carries the manual labels over by ID when it
+rewrites lya_group_<tier>.csv, but backing up the labelled CSVs first is still
+sensible.
 
 Usage
 -----
@@ -137,12 +149,45 @@ def main():
         print("")
     df = df[df["manual"].isin(LABELS)].copy()
 
-    # Columns the captions and summary page need but the tier CSVs lack
-    dv = pd.read_csv(delta_v_path)[["ID", "z_sys"]]
+    # Keep only ID / tier / manual from the tier CSVs, refresh every value
+    # from the current pipeline outputs (LSF-corrected FWHM, current Delta_v).
+    df = df[["ID", "tier", "manual"]].copy()
+    dv_cols = ["ID", "z_sys", "z_sys_line", "delta_v_kms",
+               "delta_v_err_kms"]
+    dv = pd.read_csv(delta_v_path)
+    missing = [c for c in dv_cols if c not in dv.columns]
+    if missing:
+        raise KeyError(f"{missing} not in {delta_v_path}")
+    dv = dv[dv_cols]
     dv["ID"] = dv["ID"].astype(int)
-    props = pd.read_csv(properties_path)[["ID", "quality_reason"]]
+    prop_cols = ["ID", "fwhm_int_kms", "fwhm_obs_kms", "fwhm_lsf_kms",
+                 "resolved", "skew_at_max", "lya_snr", "quality_reason",
+                 "fit_success"]
+    props = pd.read_csv(properties_path)
+    missing = [c for c in prop_cols if c not in props.columns]
+    if missing:
+        raise KeyError(f"{missing} not in {properties_path}. Rerun the LSF "
+                       f"version of fit_lya_properties_grating.py and "
+                       f"mc_lya_errors_grating.py first.")
+    props = props[prop_cols]
     props["ID"] = props["ID"].astype(int)
     df = df.merge(dv, on="ID", how="left").merge(props, on="ID", how="left")
+
+    # Re-evaluate the criteria on the refreshed values
+    pass_cols = {k: [] for k in gls.CRITERIA}
+    nfail, oobs, tier_now = [], [], []
+    for _, row in df.iterrows():
+        n, crit, _, oob = gls.evaluate_source(row)
+        nfail.append(n)
+        oobs.append(oob)
+        tier_now.append(gls.tier_from_fails(n, gls.to_bool(row.get("fit_success", False))))
+        for k in pass_cols:
+            pass_cols[k].append(crit[k])
+    df["dv_out_of_band"] = oobs
+    for k, v in pass_cols.items():
+        df["pass_" + k] = v
+    df["n_criteria_failed"] = nfail
+    df["tier_now"] = tier_now
 
     grating_map = gls.load_grating_map(systemic_path)
 
@@ -151,9 +196,9 @@ def main():
     df["_err_sort"] = pd.to_numeric(df["delta_v_err_kms"], errors="coerce")
     df["_err_sort"] = df["_err_sort"].where(np.isfinite(df["_err_sort"]), np.inf)
 
-    # Output columns match the tier CSVs
-    tier_cols = pd.read_csv(
-        os.path.join(tier_dir, "lya_group_gold.csv"), nrows=0).columns.tolist()
+    # Output columns match the tier CSVs written by group_lya_sample.py
+    tier_cols = (gls.CSV_VALUE_COLS + ["pass_" + k for k in gls.CRITERIA]
+                 + ["n_criteria_failed", "tier", "tier_now", "manual", "z_sys"])
 
     os.makedirs(outdir, exist_ok=True)
     written = []

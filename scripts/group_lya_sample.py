@@ -7,10 +7,24 @@ rather than the OIII-only version. Six pass/fail criteria per source:
   1. zsys_is_OIII        z_sys_line == 'OIII'
   2. dv_positive         delta_v_kms > 0
   3. dv_err<120          delta_v_err_kms < 120 km/s
-  4. fwhm>100            Lya FWHM > 100 km/s
+  4. fwhm>lsf            Intrinsic (LSF-corrected) Lya FWHM at least
+                         --lsf-frac x the MUSE LSF FWHM at the line
+                         (default 1.0, i.e. fwhm_int_kms >= fwhm_lsf_kms).
+                         This replaces the old fixed FWHM > 100 km/s cut,
+                         which sat below the MUSE resolution for z < 5. It
+                         is stricter than the fitter's own 'resolved' flag
+                         (0.5 x LSF), which only marks widths that are
+                         upper limits.
   5. snr>3               Lya S/N > 3
-  6. not_pinned_or_oob   NOT flagged skew_pinned or dv_out_of_band (the two
-                         count as one combined criterion)
+  6. not_oob             NOT flagged dv_out_of_band. The old criterion also
+                         failed skew_pinned fits. With the LSF in the fit,
+                         alpha is the intrinsic skew and reaching alpha_max
+                         means a maximally asymmetric line, not a failed fit,
+                         so it is no longer a quality failure (it is kept in
+                         the skew_at_max column).
+
+FWHM throughout is the intrinsic, LSF-corrected value (fwhm_int_kms). The
+observed and LSF widths are carried alongside for reference.
 
 Tiers by number of failed criteria (a failed Lya fit fails all six and is
 automatically 'bad', regardless of count):
@@ -35,9 +49,12 @@ Two PDFs per tier
 
 One CSV per tier
 -----------------
-  lya_group_<tier>.csv   ID, the six underlying values, a pass/fail column
-                          per criterion, n_criteria_failed, tier, and an
-                          empty 'manual' column for you to fill in by eye.
+  lya_group_<tier>.csv   ID, the underlying values, a pass/fail column
+                          per criterion, n_criteria_failed, tier, and a
+                          'manual' column for you to fill in by eye. Any
+                          a/b/c/d labels already in the existing tier CSVs
+                          are carried over by ID (turn off with
+                          --no-keep-manual), so a rerun does not wipe them.
 
 Duplicate sources are collapsed to a single row before tiering. The
 'duplicate' column in grating_sources_with_zsys.csv is 0 for a source with
@@ -48,9 +65,10 @@ Inputs
 ------
   delta_v_from_best_zsys_line.csv   z_sys, z_sys_err, z_sys_line, delta_v_kms,
                                      delta_v_err_kms (the recomputed values)
-  lya_properties_mc.csv             fwhm_kms, quality_reason, fit_success,
-                                     ra, dec (everything the Delta_v csv
-                                     doesn't carry)
+  lya_properties_mc.csv             fwhm_int_kms, fwhm_obs_kms,
+                                     fwhm_lsf_kms, resolved, skew_at_max,
+                                     quality_reason, fit_success, ra, dec
+                                     (everything the Delta_v csv doesn't carry)
   systemic_redshifts_by_JELS_ID.csv only used to look up which grating each
                                      source's chosen line was fitted in, so
                                      the pairs PDF can find the right PNG
@@ -75,7 +93,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # Criterion thresholds
 DV_ERR_MAX = 120.0      # km/s
-FWHM_MIN = 100.0        # km/s
+LSF_FRAC = 1.0          # fwhm_int_kms must be >= LSF_FRAC * fwhm_lsf_kms
 SNR_MIN = 3.0
 
 # Lines in the priority order used by find_delta_v_from_best_zsys_line.py,
@@ -93,8 +111,13 @@ FULL_GRATING = {
     "G395H": "G395H_F290LP",
 }
 
-CRITERIA = ["zsys_is_OIII", "dv_positive", "dv_err<120", "fwhm>100",
-            "snr>3", "not_pinned_or_oob"]
+CRITERIA = ["zsys_is_OIII", "dv_positive", "dv_err<120", "fwhm>lsf",
+            "snr>3", "not_oob"]
+
+# Value columns written to every tier CSV (and reused by group_by_manual.py).
+CSV_VALUE_COLS = ["ID", "z_sys_line", "delta_v_kms", "delta_v_err_kms",
+                  "fwhm_int_kms", "fwhm_obs_kms", "fwhm_lsf_kms", "resolved",
+                  "lya_snr", "skew_at_max", "dv_out_of_band"]
 
 
 # ============================================================
@@ -186,38 +209,57 @@ def deduplicate(df, dup_map):
     return out, dropped
 
 
+def read_manual_labels(outdir, tiers):
+    """Return {ID: label} for every non-blank 'manual' entry in the existing
+    lya_group_<tier>.csv files, so a rerun keeps the labels."""
+    labels = {}
+    for tier in tiers:
+        path = os.path.join(outdir, f"lya_group_{tier}.csv")
+        if not os.path.exists(path):
+            continue
+        df = pd.read_csv(path)
+        if "manual" not in df.columns or "ID" not in df.columns:
+            continue
+        for sid, lab in zip(df["ID"].astype(int), df["manual"]):
+            if isinstance(lab, str) and lab.strip():
+                labels[int(sid)] = lab.strip().lower()
+    return labels
+
+
 # ============================================================
 # Criteria and tiering
 # ============================================================
 
 def evaluate_source(row):
-    """Return (n_fail, criteria_dict, pinned, oob) for one source."""
+    """Return (n_fail, criteria_dict, skew_max, oob) for one source."""
     fit_ok = to_bool(row.get("fit_success", False))
 
     z_sys_line = row.get("z_sys_line")
     dv = pd.to_numeric(row.get("delta_v_kms"), errors="coerce")
     dv_err = pd.to_numeric(row.get("delta_v_err_kms"), errors="coerce")
-    fwhm = pd.to_numeric(row.get("fwhm_kms"), errors="coerce")
+    fwhm_int = pd.to_numeric(row.get("fwhm_int_kms"), errors="coerce")
+    fwhm_lsf = pd.to_numeric(row.get("fwhm_lsf_kms"), errors="coerce")
     snr = pd.to_numeric(row.get("lya_snr"), errors="coerce")
     reason = row.get("quality_reason", "")
 
-    pinned = has_flag(reason, "skew_pinned")
+    skew_max = to_bool(row.get("skew_at_max", False))
     oob = has_flag(reason, "dv_out_of_band")
 
     crit = {
         "zsys_is_OIII": (isinstance(z_sys_line, str) and z_sys_line == "OIII"),
         "dv_positive": bool(np.isfinite(dv) and dv > 0),
         "dv_err<120": bool(np.isfinite(dv_err) and dv_err < DV_ERR_MAX),
-        "fwhm>100": bool(np.isfinite(fwhm) and fwhm > FWHM_MIN),
+        "fwhm>lsf": bool(np.isfinite(fwhm_int) and np.isfinite(fwhm_lsf)
+                         and fwhm_int >= LSF_FRAC * fwhm_lsf),
         "snr>3": bool(np.isfinite(snr) and snr > SNR_MIN),
-        "not_pinned_or_oob": (not pinned and not oob),
+        "not_oob": not oob,
     }
 
     if not fit_ok:
         crit = {k: False for k in crit}
 
     n_fail = sum(1 for v in crit.values() if not v)
-    return n_fail, crit, pinned, oob
+    return n_fail, crit, skew_max, oob
 
 
 def tier_from_fails(n_fail, fit_ok):
@@ -246,23 +288,30 @@ def caption_for(row):
     snr = pd.to_numeric(row.get("lya_snr"), errors="coerce")
     dv = pd.to_numeric(row.get("delta_v_kms"), errors="coerce")
     dv_err = pd.to_numeric(row.get("delta_v_err_kms"), errors="coerce")
-    fwhm = pd.to_numeric(row.get("fwhm_kms"), errors="coerce")
+    fwhm = pd.to_numeric(row.get("fwhm_int_kms"), errors="coerce")
+    resolved = to_bool(row.get("resolved", False))
 
     snr_str = f"{snr:.1f}" if np.isfinite(snr) else "nan"
     dv_str = f"{dv:.0f}" if np.isfinite(dv) else "nan"
     dverr_str = f"{dv_err:.0f}" if np.isfinite(dv_err) else "nan"
     fwhm_str = f"{fwhm:.0f}" if np.isfinite(fwhm) else "nan"
+    if np.isfinite(fwhm) and not resolved:
+        fwhm_str = "<" + fwhm_str
 
     reason = row.get("quality_reason", "")
     notes = []
-    if has_flag(reason, "skew_pinned"):
-        notes.append("skew pinned")
+    if not resolved:
+        notes.append("unresolved")
+    else:
+        lsf = pd.to_numeric(row.get("fwhm_lsf_kms"), errors="coerce")
+        if np.isfinite(fwhm) and np.isfinite(lsf) and fwhm < LSF_FRAC * lsf:
+            notes.append("FWHM < LSF")
     if has_flag(reason, "dv_out_of_band"):
         notes.append("dv OOB")
     note_str = ("   [" + ", ".join(notes) + "]") if notes else ""
 
     return (f"ID {sid}   $z_{{\\rm sys}}$: {line_str}   S/N {snr_str}   "
-            f"FWHM {fwhm_str}   $\\Delta v$={dv_str}$\\pm${dverr_str} km/s"
+            f"FWHM$_{{\\rm int}}$ {fwhm_str}   $\\Delta v$={dv_str}$\\pm${dverr_str} km/s"
             f"{note_str}")
 
 
@@ -270,7 +319,7 @@ def make_summary_page(pdf, tier_df, tier_name):
     """Page of z_sys, delta_v and FWHM histograms for the tier."""
     z = pd.to_numeric(tier_df.get("z_sys"), errors="coerce").dropna()
     dv = pd.to_numeric(tier_df.get("delta_v_kms"), errors="coerce").dropna()
-    fwhm = pd.to_numeric(tier_df.get("fwhm_kms"), errors="coerce").dropna()
+    fwhm = pd.to_numeric(tier_df.get("fwhm_int_kms"), errors="coerce").dropna()
 
     fig, axes = plt.subplots(1, 3, figsize=(16.5, 4.5))
 
@@ -285,8 +334,8 @@ def make_summary_page(pdf, tier_df, tier_name):
     axes[1].set_title("Velocity offset")
 
     axes[2].hist(fwhm, bins="auto", color="indianred", edgecolor="black")
-    axes[2].set_xlabel("FWHM [km/s]")
-    axes[2].set_title("Line width")
+    axes[2].set_xlabel(r"FWHM$_{\rm int}$ [km/s]")
+    axes[2].set_title("Intrinsic line width (LSF corrected)")
 
     fig.suptitle(f"{tier_name.capitalize()} tier summary  |  {len(tier_df)} sources",
                  fontsize=13)
@@ -403,6 +452,7 @@ def build_paired_sheet(tier_df, figdir, grating_map, outpdf, tier_name):
 # ============================================================
 
 def main():
+    global LSF_FRAC
     p = argparse.ArgumentParser(
         description="Tier Lya sample (gold/silver/bronze/stone/bad) and "
                     "build the contact-sheet and paired-fit PDFs.")
@@ -412,7 +462,8 @@ def main():
                         "find_delta_v_from_best_zsys_line.py.")
     p.add_argument("--properties-csv",
                    default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv",
-                   help="fwhm_kms, quality_reason, fit_success, ra, dec.")
+                   help="fwhm_int_kms, fwhm_obs_kms, fwhm_lsf_kms, resolved, "
+                        "skew_at_max, quality_reason, fit_success, ra, dec.")
     p.add_argument("--systemic-csv",
                    default="/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv",
                    help="Used only to look up the grating of the chosen "
@@ -427,7 +478,14 @@ def main():
                    help="Where {ID}_lya_fit.png live.")
     p.add_argument("--outdir",
                    default="/ceph/cephfs/apatrick/P2/MUSE_catalogs")
+    p.add_argument("--lsf-frac", type=float, default=LSF_FRAC,
+                   help="Criterion fwhm>lsf passes when fwhm_int_kms >= this "
+                        "x fwhm_lsf_kms. Default 1.0.")
+    p.add_argument("--no-keep-manual", action="store_true",
+                   help="Do not carry over the manual a/b/c/d labels from the "
+                        "existing lya_group_<tier>.csv files in --outdir.")
     args = p.parse_args()
+    LSF_FRAC = args.lsf_frac
 
     delta_v_path = os.path.abspath(args.delta_v_csv)
     properties_path = os.path.abspath(args.properties_csv)
@@ -443,16 +501,20 @@ def main():
     print(f"  duplicate csv   {grating_sources_path}")
     print(f"  figure dir      {figdir}")
     print(f"  output dir      {outdir}")
-    print(f"  criteria        dv_err<{DV_ERR_MAX:g}, fwhm>{FWHM_MIN:g}, "
-          f"snr>{SNR_MIN:g}, zsys==OIII, dv>0, not(pinned|OOB)")
+    print(f"  criteria        dv_err<{DV_ERR_MAX:g}, "
+          f"fwhm_int >= {LSF_FRAC:g} x fwhm_lsf, "
+          f"snr>{SNR_MIN:g}, zsys==OIII, dv>0, not OOB")
     print("")
 
     props = pd.read_csv(properties_path)
-    for col in ("ID", "fwhm_kms", "lya_snr", "quality_reason", "fit_success",
-                "ra", "dec"):
+    for col in ("ID", "fwhm_int_kms", "fwhm_obs_kms", "fwhm_lsf_kms",
+                "resolved", "skew_at_max", "lya_snr", "quality_reason",
+                "fit_success", "ra", "dec"):
         if col not in props.columns:
             raise KeyError(
-                f"'{col}' not in {properties_path}. Available: {list(props.columns)}")
+                f"'{col}' not in {properties_path}. Rerun "
+                f"fit_lya_properties_grating.py and mc_lya_errors_grating.py "
+                f"with the LSF version. Available: {list(props.columns)}")
     props["ID"] = props["ID"].astype(int)
 
     dv = pd.read_csv(delta_v_path)
@@ -482,21 +544,19 @@ def main():
         print("")
 
     # Evaluate every source
-    tiers, nfails, notes_pinned, notes_oob = [], [], [], []
+    tiers, nfails, notes_oob = [], [], []
     crit_cols = {k: [] for k in CRITERIA}
     for _, row in merged.iterrows():
-        n_fail, crit, pinned, oob = evaluate_source(row)
+        n_fail, crit, _, oob = evaluate_source(row)
         tier = tier_from_fails(n_fail, to_bool(row.get("fit_success", False)))
         tiers.append(tier)
         nfails.append(n_fail)
-        notes_pinned.append(pinned)
         notes_oob.append(oob)
         for k in crit_cols:
             crit_cols[k].append(crit[k])
 
     merged["n_criteria_failed"] = nfails
     merged["tier"] = tiers
-    merged["skew_pinned"] = notes_pinned
     merged["dv_out_of_band"] = notes_oob
     for k, v in crit_cols.items():
         merged["pass_" + k] = v
@@ -504,9 +564,34 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     order = ["gold", "silver", "bronze", "stone", "bad"]
-    csv_value_cols = ["ID", "z_sys_line", "delta_v_kms", "delta_v_err_kms",
-                      "fwhm_kms", "lya_snr", "skew_pinned", "dv_out_of_band"]
+    csv_value_cols = CSV_VALUE_COLS
     csv_pass_cols = ["pass_" + k for k in CRITERIA]
+
+    # Carry over manual labels already written into the existing tier CSVs,
+    # matched by ID, before those files are overwritten.
+    manual_map = {} if args.no_keep_manual else read_manual_labels(outdir, order)
+    if manual_map:
+        print(f"[INFO] carrying over {len(manual_map)} manual labels from the "
+              f"existing tier CSVs in {outdir}")
+        # Deduplication keeps the pair member with the smaller delta_v_err,
+        # which can switch after a rerun. Let the kept member inherit its
+        # partner's label so no label is lost.
+        for sid in merged["ID"].astype(int):
+            if sid in manual_map:
+                continue
+            grp = int(dup_map.get(sid, 0) or 0)
+            if grp == 0:
+                continue
+            partners = [k for k, g in dup_map.items()
+                        if int(g or 0) == grp and k != sid and k in manual_map]
+            if partners:
+                manual_map[sid] = manual_map[partners[0]]
+                print(f"[INFO] ID {sid} inherits manual label "
+                      f"'{manual_map[sid]}' from duplicate partner {partners[0]}")
+        unlabelled = [int(i) for i in merged["ID"] if int(i) not in manual_map]
+        if unlabelled:
+            print(f"[WARN] {len(unlabelled)} sources have no manual label and "
+                  f"will need one by eye: {unlabelled}")
 
     for tier in order:
         tdf = merged[merged["tier"] == tier].sort_values(
@@ -518,7 +603,7 @@ def main():
         # Per-tier CSV
         tier_csv = tdf[csv_value_cols + csv_pass_cols + ["n_criteria_failed"]].copy()
         tier_csv["tier"] = tier
-        tier_csv["manual"] = ""
+        tier_csv["manual"] = tier_csv["ID"].map(manual_map).fillna("")
         out_csv = os.path.join(outdir, f"lya_group_{tier}.csv")
         tier_csv.to_csv(out_csv, index=False)
         print(f"        csv    -> {out_csv}")
@@ -540,7 +625,7 @@ def main():
                   f"{sorted(set(miss_line))}")
 
     print("")
-    print("[DONE]")
+    print(f"[DONE] all outputs in {outdir}")
 
 
 if __name__ == "__main__":

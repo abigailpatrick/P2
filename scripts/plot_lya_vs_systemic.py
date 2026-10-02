@@ -38,8 +38,11 @@ Inputs (all from the existing P2 pipeline)
 Where the lines come from
 -------------------------
 Lya. The plotted model is the saved science fit. fit_lya_properties_grating's
-own skew_model is evaluated at mu, sigma, alpha_skew and flux_fit from
-lya_properties_mc.csv, and its peak is checked against lya_peak_wave.
+own skew_model_lsf (intrinsic skewed Gaussian convolved with the MUSE LSF) is
+evaluated at mu, sigma, alpha_skew, flux_fit and sigma_lsf_ang from
+lya_properties_mc.csv, so the curve is what is compared with the data. Its
+peak (observed or intrinsic, following the peak_used column) is checked
+against lya_peak_wave.
 
 Systemic line. The LiMe scripts save only z, z_err and S/N, not the
 continuum-subtracted spectrum or the Gaussian parameters. So the fit is
@@ -221,9 +224,10 @@ def y_limits(flux_list, err_list, pad_frac=0.12):
 def load_lya(npz_path, prow, flp, n_mc, rng, fit_window, sigma_min, alpha_max):
     """MUSE spectrum and the science Lya fit, in vacuum wavelength.
 
-    The plotted model is the saved science fit, flp.skew_model evaluated at
-    mu, sigma, alpha_skew and flux_fit from lya_properties_mc.csv. Nothing is
-    refitted for the model itself. The optional grey 1 sigma band uses the
+    The plotted model is the saved science fit, flp.skew_model_lsf evaluated
+    at mu, sigma, alpha_skew, flux_fit and sigma_lsf_ang from
+    lya_properties_mc.csv, i.e. the LSF-convolved model. Nothing is refitted
+    for the model itself. The optional grey 1 sigma band uses the
     same model-mode bootstrap as mc_lya_errors_grating.py (best model plus
     noise, refit with flp.fit_skewed_gaussian and identical settings).
     """
@@ -233,16 +237,22 @@ def load_lya(npz_path, prow, flp, n_mc, rng, fit_window, sigma_min, alpha_max):
     var = np.asarray(d["var"], dtype=float)
     err = np.sqrt(np.clip(var, 0.0, np.inf))
 
-    mu, sig, alpha, ftot = (float(prow[k]) for k in
-                            ("mu", "sigma", "alpha_skew", "flux_fit"))
+    mu, sig, alpha, ftot, s_lsf = (float(prow[k]) for k in
+                                   ("mu", "sigma", "alpha_skew", "flux_fit",
+                                    "sigma_lsf_ang"))
     centre = float(prow["best_center"]) if np.isfinite(prow["best_center"]) else mu
+    peak_used = str(prow.get("peak_used", "obs"))
+    sig_obs, alpha_obs = flp.convolved_skew_params(sig, alpha, s_lsf)
 
     # Consistency check against the catalogue peak wavelength.
-    peak_air = flp.compute_peak_from_model(mu, sig, alpha)
+    if peak_used == "int":
+        peak_air = flp.compute_peak_from_model(mu, sig, alpha)
+    else:
+        peak_air = flp.compute_peak_from_model(mu, sig_obs, alpha_obs)
     peak_diff = C_KMS * (peak_air - float(prow["lya_peak_wave"])) / peak_air
 
-    grid_air = np.linspace(mu - 12 * sig, mu + 12 * sig, 1500)
-    best = flp.skew_model(grid_air, ftot, mu, sig, alpha)
+    grid_air = np.linspace(mu - 12 * sig_obs, mu + 12 * sig_obs, 1500)
+    best = flp.skew_model_lsf(grid_air, ftot, mu, sig, alpha, s_lsf)
     peak = np.nanmax(best)
 
     lo = hi = None
@@ -250,7 +260,7 @@ def load_lya(npz_path, prow, flp, n_mc, rng, fit_window, sigma_min, alpha_max):
     if n_mc > 0:
         models = []
         sel = (wave_air >= centre - fit_window) & (wave_air <= centre + fit_window)
-        base = flp.skew_model(wave_air, ftot, mu, sig, alpha)
+        base = flp.skew_model_lsf(wave_air, ftot, mu, sig, alpha, s_lsf)
         for _ in range(n_mc):
             fake = flux.copy()
             fake[sel] = base[sel] + rng.normal(0.0, err[sel])
@@ -259,8 +269,10 @@ def load_lya(npz_path, prow, flp, n_mc, rng, fit_window, sigma_min, alpha_max):
                                           sigma_min=sigma_min,
                                           alpha_max=alpha_max)
             if fit["fit_success"]:
-                models.append(flp.skew_model(grid_air, fit["flux_fit"], fit["mu"],
-                                             fit["sigma"], fit["alpha_skew"]))
+                models.append(flp.skew_model_lsf(grid_air, fit["flux_fit"],
+                                                 fit["mu"], fit["sigma"],
+                                                 fit["alpha_skew"],
+                                                 fit["sigma_lsf_ang"]))
         n_ok = len(models)
         if n_ok >= 10:
             lo, hi = np.nanpercentile(np.array(models), [16, 84], axis=0)
@@ -634,8 +646,12 @@ def parse_args():
                         "0 turns the bands off and speeds the run up.")
     p.add_argument("--fit-window", type=float, default=25.0,
                    help="Lya fit half-window, AA. Must match the science run.")
-    p.add_argument("--sigma-min", type=float, default=1.0)
-    p.add_argument("--alpha-max", type=float, default=15.0)
+    p.add_argument("--sigma-min", type=float, default=None,
+                   help="Must match the science run. Default is the fitter's "
+                        "SIGMA_MIN_DEFAULT (0.1 AA, intrinsic sigma).")
+    p.add_argument("--alpha-max", type=float, default=None,
+                   help="Must match the science run. Default is the fitter's "
+                        "ALPHA_MAX_DEFAULT (15).")
     p.add_argument("--refit-tol", type=float, default=1.0,
                    help="Warn if the repeated LiMe fit differs from catalogue "
                         "z_sys by more than this, km/s. It should agree "
@@ -651,6 +667,10 @@ def main():
     args = parse_args()
     rng = np.random.default_rng(args.seed)
     flp, oj, lj = import_pipeline(args.scripts_dir)
+    if args.sigma_min is None:
+        args.sigma_min = flp.SIGMA_MIN_DEFAULT
+    if args.alpha_max is None:
+        args.alpha_max = flp.ALPHA_MAX_DEFAULT
     # Point the LiMe modules at the chosen catalogue directory.
     oj.CATALOG_DIR = lj.CATALOG_DIR = os.path.abspath(args.catalog_dir)
 

@@ -19,7 +19,10 @@ already picked the highest-S/N grating where more than one succeeded. This
 script just reads whichever z_<line> column is populated.
 
 z_lya, z_lya_err_mc (the bootstrap error on the Lya line centre) and lya_snr
-come straight from lya_properties_mc.csv. Neither the Lya fit nor its Monte
+come straight from lya_properties_mc.csv. z_lya is the peak of the
+LSF-convolved model by default (peak_used = 'obs', see
+fit_lya_properties_grating.py --peak), and z_lya_int / z_lya_obs are carried
+through so the alternative Delta_v can be compared. Neither the Lya fit nor its Monte
 Carlo bootstrap depend on which systemic line is used, so nothing there is
 re-run. Only the two things that do depend on z_sys are recomputed:
 
@@ -154,6 +157,7 @@ def main():
             "ra": lrow.get("ra"),
             "dec": lrow.get("dec"),
             "z_lya": float(z_lya) if pd.notna(z_lya) else np.nan,
+            "peak_used": lrow.get("peak_used"),
             "lya_snr": lrow.get("lya_snr"),
             "fit_success": lrow.get("fit_success"),
             "z_sys": np.nan, "z_sys_err": np.nan, "z_sys_snr": np.nan,
@@ -192,6 +196,13 @@ def main():
         err_terms = [e for e in (dv_err_sys, dv_err_lya) if np.isfinite(e)]
         dv_err = float(np.sqrt(sum(e ** 2 for e in err_terms))) if err_terms else np.nan
 
+        extra = {}
+        for kind in ("obs", "int"):
+            zk = pd.to_numeric(lrow.get(f"z_lya_{kind}"), errors="coerce")
+            extra[f"delta_v_{kind}_kms"] = (float(conv * (zk - z_sys))
+                                            if pd.notna(zk) else np.nan)
+
+        out.update(extra)
         out.update({
             "z_sys": z_sys, "z_sys_err": z_sys_err, "z_sys_snr": z_sys_snr,
             "z_sys_line": z_sys_line,

@@ -15,6 +15,13 @@ model, bounds, initial guesses, weighting and fit centre are identical to the
 science run. The fit is centred on best_center from the sliding-S/N CSV, exactly
 as in the science run, so pass the same --snr-csv and --fit-window here.
 
+The fit model includes the MUSE LSF (Bacon et al. 2017 polynomial, see
+fit_lya_properties_grating.py), so each refit returns both the intrinsic and
+the observed (LSF-convolved) FWHM. Both get an MC error, fwhm_int_kms_err_mc
+and fwhm_obs_kms_err_mc. frac_unresolved_mc is the fraction of refits in which
+the line is unresolved, a guide to how secure the intrinsic width is. The
+peak used for z_lya follows --peak, which must match the science run.
+
 Two noise modes, as in the Paper 1 flux-error add-on, and the distinction
 matters:
 
@@ -87,7 +94,8 @@ def at_bound(value, low, high, rtol=1e-3):
 
 
 def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
-                      n_mc, fit_window, sigma_min, alpha_max, mode, rng):
+                      n_mc, fit_window, sigma_min, alpha_max, mode, rng,
+                      resolve_frac, peak):
     """Refit one source under N noise realisations and derive error columns.
 
     Returns a dict of Monte Carlo results. The velocity-offset error combines
@@ -103,7 +111,9 @@ def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
         "delta_v_err_sys_kms": np.nan,
         "delta_v_err_kms": np.nan,
         "flux_fit_err_mc": np.nan,
-        "fwhm_kms_err_mc": np.nan,
+        "fwhm_int_kms_err_mc": np.nan,
+        "fwhm_obs_kms_err_mc": np.nan,
+        "frac_unresolved_mc": np.nan,
         "frac_alpha_at_bound": np.nan,
         "frac_sigma_at_bound": np.nan,
         "frac_mu_at_bound": np.nan,
@@ -117,11 +127,11 @@ def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
     if not np.isfinite(centre) or wave.size == 0:
         return out
 
+    fit_kw = dict(fit_window=fit_window, sigma_min=sigma_min,
+                  alpha_max=alpha_max, resolve_frac=resolve_frac, peak=peak)
+
     # Unperturbed refit, reproduces the science run and checks settings match.
-    base_fit = flp.fit_skewed_gaussian(
-        wave, flux, var, centre,
-        fit_window=fit_window, sigma_min=sigma_min, alpha_max=alpha_max,
-    )
+    base_fit = flp.fit_skewed_gaussian(wave, flux, var, centre, **fit_kw)
     if not base_fit["fit_success"]:
         return out
     out["lya_peak_repeat"] = float(base_fit["lya_peak"])
@@ -129,28 +139,29 @@ def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
     noise_sigma = np.sqrt(np.clip(var, 0.0, np.inf))
 
     if mode == "model":
-        base_spectrum = flp.skew_model(
+        # The LSF-convolved model, since that is what the data are drawn from.
+        base_spectrum = flp.skew_model_lsf(
             wave, base_fit["flux_fit"], base_fit["mu"],
-            base_fit["sigma"], base_fit["alpha_skew"],
+            base_fit["sigma"], base_fit["alpha_skew"], base_fit["sigma_lsf_ang"],
         )
         base_spectrum = np.where(np.isfinite(base_spectrum), base_spectrum, 0.0)
     else:
         base_spectrum = flux
 
-    peak_draws, flux_draws, fwhm_draws = [], [], []
+    peak_draws, flux_draws = [], []
+    fwhm_int_draws, fwhm_obs_draws, resolved_draws = [], [], []
     alpha_draws, sigma_draws, mu_draws = [], [], []
 
     for _ in range(n_mc):
         realisation = base_spectrum + rng.normal(loc=0.0, scale=noise_sigma)
-        fit = flp.fit_skewed_gaussian(
-            wave, realisation, var, centre,
-            fit_window=fit_window, sigma_min=sigma_min, alpha_max=alpha_max,
-        )
+        fit = flp.fit_skewed_gaussian(wave, realisation, var, centre, **fit_kw)
         if not fit["fit_success"] or not np.isfinite(fit["lya_peak"]):
             continue
         peak_draws.append(float(fit["lya_peak"]))
         flux_draws.append(float(fit["flux_fit"]))
-        fwhm_draws.append(float(fit["fwhm_kms"]))
+        fwhm_int_draws.append(float(fit["fwhm_int_kms"]))
+        fwhm_obs_draws.append(float(fit["fwhm_obs_kms"]))
+        resolved_draws.append(bool(fit["resolved"]))
         alpha_draws.append(float(fit["alpha_skew"]))
         sigma_draws.append(float(fit["sigma"]))
         mu_draws.append(float(fit["mu"]))
@@ -189,15 +200,18 @@ def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
     if flux_draws.size >= 10:
         out["flux_fit_err_mc"] = float(np.std(flux_draws, ddof=1))
 
-    fwhm_draws = np.asarray(fwhm_draws, dtype=float)
-    fwhm_draws = fwhm_draws[np.isfinite(fwhm_draws)]
-    if fwhm_draws.size >= 10:
-        out["fwhm_kms_err_mc"] = float(np.std(fwhm_draws, ddof=1))
+    for key, draws in (("fwhm_int_kms_err_mc", fwhm_int_draws),
+                       ("fwhm_obs_kms_err_mc", fwhm_obs_draws)):
+        d = np.asarray(draws, dtype=float)
+        d = d[np.isfinite(d)]
+        if d.size >= 10:
+            out[key] = float(np.std(d, ddof=1))
+    out["frac_unresolved_mc"] = float(1.0 - np.mean(resolved_draws))
 
     out["frac_alpha_at_bound"] = float(
         np.mean([at_bound(a, 0.0, alpha_max) for a in alpha_draws]))
     out["frac_sigma_at_bound"] = float(
-        np.mean([at_bound(s, sigma_min, 50.0) for s in sigma_draws]))
+        np.mean([at_bound(s, sigma_min, flp.SIGMA_MAX) for s in sigma_draws]))
     out["frac_mu_at_bound"] = float(
         np.mean([at_bound(m, centre - 10.0, centre + 10.0) for m in mu_draws]))
     return out
@@ -235,10 +249,18 @@ def main():
                              "observed spectrum.")
     parser.add_argument("--fit-window", type=float, default=25.0,
                         help="Must match the science run (default 25).")
-    parser.add_argument("--sigma-min", type=float, default=1.0,
-                        help="Must match the science run.")
-    parser.add_argument("--alpha-max", type=float, default=15.0,
-                        help="Must match the science run (default 15).")
+    parser.add_argument("--sigma-min", type=float, default=None,
+                        help="Must match the science run. Default is the "
+                             "fitter's SIGMA_MIN_DEFAULT (0.1 AA, intrinsic).")
+    parser.add_argument("--alpha-max", type=float, default=None,
+                        help="Must match the science run. Default is the "
+                             "fitter's ALPHA_MAX_DEFAULT (15).")
+    parser.add_argument("--resolve-frac", type=float, default=None,
+                        help="Must match the science run. Default is the "
+                             "fitter's RESOLVE_FRAC_DEFAULT (0.5).")
+    parser.add_argument("--peak", choices=["obs", "int"], default=None,
+                        help="Must match the science run. Default is the "
+                             "fitter's PEAK_DEFAULT ('obs').")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility.")
     parser.add_argument("--row-index", type=int, default=None,
@@ -256,6 +278,14 @@ def main():
 
     fitter_dir = args.fitter_dir or os.path.dirname(os.path.abspath(__file__))
     flp = load_fitter(fitter_dir)
+    if args.sigma_min is None:
+        args.sigma_min = flp.SIGMA_MIN_DEFAULT
+    if args.alpha_max is None:
+        args.alpha_max = flp.ALPHA_MAX_DEFAULT
+    if args.resolve_frac is None:
+        args.resolve_frac = flp.RESOLVE_FRAC_DEFAULT
+    if args.peak is None:
+        args.peak = flp.PEAK_DEFAULT
 
     print("[CONFIG]")
     print(f"  Spectra directory : {os.path.abspath(args.indir)}")
@@ -263,7 +293,10 @@ def main():
     print(f"  Catalogue         : {os.path.abspath(args.catalog)}")
     print(f"  Properties CSV    : {os.path.abspath(args.properties_csv)}")
     print(f"  Output CSV        : {os.path.abspath(args.out_csv)}")
+    print(f"  Fitter            : {os.path.join(os.path.abspath(fitter_dir), 'fit_lya_properties_grating.py')}")
     print(f"  mode = {args.mode}, N = {args.n_mc}, seed = {args.seed}")
+    print(f"  sigma_min = {args.sigma_min} AA, alpha_max = {args.alpha_max}, "
+          f"resolve_frac = {args.resolve_frac}, peak = {args.peak}")
     print("")
 
     # Catalogue: z_sys (with fallback) and z_sys_err
@@ -334,7 +367,7 @@ def main():
         res = run_mc_for_source(
             flp, npz_path, centre, z_sys, z_sys_err,
             args.n_mc, args.fit_window, args.sigma_min, args.alpha_max,
-            args.mode, rng,
+            args.mode, rng, args.resolve_frac, args.peak,
         )
         res["ID"] = idx
 
@@ -345,7 +378,8 @@ def main():
             drift = abs(repeat - original) / abs(original)
             if drift > 1e-4:
                 print(f"[WARN] ID {idx}: refit peak differs from science run by "
-                      f"{1e4 * drift:.1f}e-4 frac, check fit-window/sigma/alpha")
+                      f"{1e4 * drift:.1f}e-4 frac, check fit-window/sigma/"
+                      f"alpha/peak match the science run")
 
         records.append(res)
         print(f"  ID {idx}: dv_err = {res['delta_v_err_kms']:.1f} km/s "
@@ -361,14 +395,14 @@ def main():
         os.makedirs(os.path.dirname(os.path.abspath(args.out_csv)), exist_ok=True)
         mc.to_csv(args.out_csv, index=False)
         print("")
-        print(f"[INFO] written partial {args.out_csv}")
+        print(f"[INFO] written partial {os.path.abspath(args.out_csv)}")
         return
 
     merged = props.merge(mc, on="ID", how="left")
     os.makedirs(os.path.dirname(os.path.abspath(args.out_csv)), exist_ok=True)
     merged.to_csv(args.out_csv, index=False)
     print("")
-    print(f"[INFO] written {args.out_csv}")
+    print(f"[INFO] written {os.path.abspath(args.out_csv)}")
 
     # Summary of which term dominates the velocity error
     valid = merged[np.isfinite(merged["delta_v_err_kms"])]

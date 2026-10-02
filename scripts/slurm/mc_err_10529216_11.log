@@ -1,0 +1,21 @@
+=======================================
+MC error task 11 (job 10529216)
+Node: worker092  started: Fri  2 Oct 11:02:17 BST 2026
+=======================================
+[CONFIG]
+  Spectra directory : /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts
+  Sliding-S/N CSV   : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv
+  Catalogue         : /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv
+  Properties CSV    : /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv
+  Output CSV        : /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row11.csv
+  Fitter            : /ceph/cephfs/apatrick/P2/scripts/fit_lya_properties_grating.py
+  mode = model, N = 500, seed = 42
+  sigma_min = 0.1 AA, alpha_max = 15.0, resolve_frac = 0.5, peak = obs
+
+[INFO] 82 successfully-fitted sources to bootstrap
+[INFO] SLURM array mode: processing row 11 (ID 18444) only
+
+  ID 18444: dv_err = 86.4 km/s (Lya 81.9, sys 27.5), 500/500 fits converged
+
+[INFO] written partial /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row11.csv
+Task 11 finished at: Fri  2 Oct 11:02:48 BST 2026

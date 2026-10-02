@@ -16,6 +16,46 @@ ap_extract_specs_grating.py) this script:
 The skewed-Gaussian machinery matches Patrick et al. (Paper 1): a skewnorm.pdf
 normalised so the fitted amplitude parameter is the integrated line flux.
 
+MUSE line spread function (LSF)
+-------------------------------
+The fit is a forward model. The fitted parameters (mu, sigma, alpha_skew)
+describe the INTRINSIC line, and the model compared with the data is that
+intrinsic profile convolved with a Gaussian LSF. The LSF FWHM follows the
+Bacon et al. (2017) Eq. 7 polynomial for the MUSE mosaic,
+    FWHM_LSF(lambda) = 5.835e-8 lambda^2 - 9.080e-4 lambda + 5.983   [AA]
+evaluated at the fitted line centre (air wavelength, as the cube). It varies
+by ~0.01 AA across the fit window, so one value per source is used.
+
+A skew-normal convolved with a Gaussian of width s is exactly another
+skew-normal with the same location and
+    sigma_obs = sqrt(sigma^2 + s^2)
+    alpha_obs = alpha sigma / sqrt(sigma^2 + s^2 (1 + alpha^2))
+so no numerical convolution is needed.
+
+Reported widths
+  fwhm_int_*   FWHM of the intrinsic (LSF-corrected) profile. Use for science.
+  fwhm_obs_*   FWHM of the convolved model, i.e. what MUSE sees.
+  fwhm_lsf_kms LSF FWHM at the line, km/s.
+Velocity offsets
+  z_lya, delta_v_kms         from the peak chosen by --peak (default 'obs',
+                             the peak of the convolved model, i.e. the
+                             observed line peak, as in Paper 1 and most of
+                             the literature).
+  z_lya_obs, delta_v_obs_kms peak of the convolved model.
+  z_lya_int, delta_v_int_kms peak of the intrinsic profile. For strongly
+                             skewed lines the intrinsic skew-normal has a
+                             sharp blue edge and its peak sits on that edge,
+                             so this is model dependent. Kept for comparison.
+
+Skew
+  alpha_skew is the intrinsic skew. alpha_skew at --alpha-max is no longer a
+  quality failure (see assess_quality), it is recorded in skew_at_max.
+
+A line is 'resolved' when its intrinsic FWHM is at least --resolve-frac (default
+0.5) of the LSF FWHM and the intrinsic sigma is not sitting on its lower
+bound. Unresolved lines get 'unresolved' in quality_reason and their intrinsic
+FWHM should be treated as an upper limit.
+
 z_sys is read from the catalogue 'z_sys' column, falling back to 'z_dja' where
 z_sys is blank, consistent with the rest of the P2 pipeline.
 
@@ -42,6 +82,22 @@ import matplotlib.pyplot as plt
 
 LYA_REST = 1215.67       # AA, vacuum rest wavelength of Lya
 C_KMS = 299792.458
+FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))   # 1 / 2.3548
+
+# Fit defaults, imported by mc_lya_errors_grating.py and
+# plot_lya_vs_systemic.py so every script fits with identical settings.
+# SIGMA_MIN is now the lower bound on the INTRINSIC sigma. It no longer needs
+# to stand in for the instrumental width (Paper 1 used 1.0 AA for that), the
+# LSF convolution provides the floor.
+SIGMA_MIN_DEFAULT = 0.1      # AA
+SIGMA_MAX = 50.0             # AA
+ALPHA_MAX_DEFAULT = 15.0
+RESOLVE_FRAC_DEFAULT = 0.5
+PEAK_DEFAULT = "obs"         # which model peak sets z_lya, 'obs' or 'int'
+
+# Bacon et al. 2017 (A&A 608, A1) Eq. 7, MUSE mosaic LSF FWHM in AA,
+# lambda in AA (air).
+BACON17_LSF_COEFFS = (5.835e-8, -9.080e-4, 5.983)
 
 
 # ============================================================
@@ -94,13 +150,50 @@ def resolve_redshift(row, zcol, zcol_fallback):
 
 
 # ============================================================
-# Skewed-Gaussian model (as Paper 1)
+# MUSE line spread function
+# ============================================================
+
+def muse_lsf_fwhm(wave_air):
+    """MUSE LSF FWHM in AA at air wavelength(s) in AA, Bacon et al. 2017 Eq. 7."""
+    a, b, c = BACON17_LSF_COEFFS
+    w = np.asarray(wave_air, dtype=float)
+    return a * w ** 2 + b * w + c
+
+
+def muse_lsf_sigma(wave_air):
+    """MUSE LSF Gaussian sigma in AA at air wavelength(s) in AA."""
+    return muse_lsf_fwhm(wave_air) * FWHM_TO_SIGMA
+
+
+# ============================================================
+# Skewed-Gaussian model (as Paper 1), with LSF convolution
 # ============================================================
 
 def skew_model(wave, flux_total, mu, sigma, alpha):
     """Skew-normal profile. skewnorm.pdf integrates to 1, so flux_total is the
-    integrated line flux."""
+    integrated line flux. With the fitted parameters this is the INTRINSIC
+    line, before the instrument."""
     return flux_total * skewnorm.pdf(wave, alpha, loc=mu, scale=sigma)
+
+
+def convolved_skew_params(sigma, alpha, sigma_lsf):
+    """Scale and shape of a skew-normal after convolution with a Gaussian of
+    width sigma_lsf. The location (mu) and integral (flux) are unchanged.
+
+    Exact, from the stochastic representation of the skew-normal:
+        sigma_obs = sqrt(sigma^2 + sigma_lsf^2)
+        alpha_obs = alpha sigma / sqrt(sigma^2 + sigma_lsf^2 (1 + alpha^2))
+    """
+    sigma_obs = np.sqrt(sigma ** 2 + sigma_lsf ** 2)
+    alpha_obs = alpha * sigma / np.sqrt(sigma ** 2 + sigma_lsf ** 2 * (1.0 + alpha ** 2))
+    return sigma_obs, alpha_obs
+
+
+def skew_model_lsf(wave, flux_total, mu, sigma, alpha, sigma_lsf):
+    """Intrinsic skew-normal convolved with the Gaussian LSF. This is the
+    model that is compared with the MUSE data."""
+    sigma_obs, alpha_obs = convolved_skew_params(sigma, alpha, sigma_lsf)
+    return skew_model(wave, flux_total, mu, sigma_obs, alpha_obs)
 
 
 def compute_fwhm_from_model(mu, sigma, alpha):
@@ -126,16 +219,39 @@ def compute_peak_from_model(mu, sigma, alpha):
     return float(grid[int(np.nanargmax(prof))])
 
 
+def _to_kms(width_ang, wave):
+    if not (np.isfinite(width_ang) and np.isfinite(wave) and wave > 0):
+        return np.nan
+    return float(width_ang / wave * C_KMS)
+
+
 def fit_skewed_gaussian(wave, flux, var, centre,
-                        fit_window=25.0, sigma_min=1.0, alpha_max=15.0):
-    """Fit a skew-normal profile within +/- fit_window of centre.
+                        fit_window=25.0, sigma_min=SIGMA_MIN_DEFAULT,
+                        alpha_max=ALPHA_MAX_DEFAULT,
+                        resolve_frac=RESOLVE_FRAC_DEFAULT,
+                        peak=PEAK_DEFAULT):
+    """Fit an LSF-convolved skew-normal within +/- fit_window of centre.
+
+    The free parameters (flux, mu, sigma, alpha) are those of the intrinsic
+    profile. The LSF sigma is fixed from the Bacon et al. 2017 polynomial at
+    the fit centre, then re-evaluated at the fitted mu and the fit repeated
+    once if they differ by more than 1e-3 AA (they almost never do, since the
+    LSF changes by ~1e-4 AA per AA).
 
     Returns a dict of fit parameters and derived quantities. On failure the
-    numeric fields are NaN and fit_success is False.
+    numeric fields are NaN and fit_success is False. 'lya_peak_int' is the peak
+    of the intrinsic profile and 'lya_peak_obs' the peak of the convolved
+    model, both in air AA. 'lya_peak' is whichever of the two 'peak' selects
+    ('obs' by default), and is what sets z_lya downstream.
     """
-    fail = dict(flux_fit=np.nan, flux_fit_err=np.nan, fwhm_ang=np.nan,
-                fwhm_kms=np.nan, alpha_skew=np.nan, mu=np.nan, sigma=np.nan,
-                lya_peak=np.nan, fit_success=False)
+    fail = dict(flux_fit=np.nan, flux_fit_err=np.nan,
+                fwhm_int_ang=np.nan, fwhm_int_kms=np.nan,
+                fwhm_obs_ang=np.nan, fwhm_obs_kms=np.nan,
+                sigma_lsf_ang=np.nan, fwhm_lsf_kms=np.nan,
+                alpha_skew=np.nan, mu=np.nan, sigma=np.nan,
+                sigma_obs=np.nan, alpha_obs=np.nan,
+                lya_peak=np.nan, lya_peak_int=np.nan, lya_peak_obs=np.nan,
+                resolved=False, skew_at_max=False, fit_success=False)
 
     sel = (wave >= centre - fit_window) & (wave <= centre + fit_window)
     sel &= np.isfinite(flux) & np.isfinite(var) & (var > 0)
@@ -151,30 +267,60 @@ def fit_skewed_gaussian(wave, flux, var, centre,
     p0 = [amp0, centre, sigma0, 2.0]
     bounds = (
         [0.0, centre - 10.0, sigma_min, 0.0],
-        [np.inf, centre + 10.0, 50.0, alpha_max],
+        [np.inf, centre + 10.0, SIGMA_MAX, alpha_max],
     )
 
-    try:
-        popt, pcov = curve_fit(
-            skew_model, w, f, p0=p0, sigma=sig, absolute_sigma=True,
-            bounds=bounds, maxfev=20000,
-        )
-    except Exception:
-        return fail
+    sigma_lsf = float(muse_lsf_sigma(centre))
+    popt = pcov = None
+    for _ in range(2):
+        def model(x, ftot, mu, sigma, alpha, _s=sigma_lsf):
+            return skew_model_lsf(x, ftot, mu, sigma, alpha, _s)
+        try:
+            popt, pcov = curve_fit(
+                model, w, f, p0=p0, sigma=sig, absolute_sigma=True,
+                bounds=bounds, maxfev=20000,
+            )
+        except Exception:
+            return fail
+        sigma_lsf_new = float(muse_lsf_sigma(popt[1]))
+        if abs(sigma_lsf_new - sigma_lsf) < 1e-3:
+            break
+        sigma_lsf = sigma_lsf_new
+        lo = np.asarray(bounds[0], dtype=float)
+        hi = np.asarray(bounds[1], dtype=float)
+        span = np.where(np.isfinite(hi - lo), hi - lo, 1.0)
+        p0 = list(np.clip(popt, lo + 1e-6 * span, hi - 1e-6 * span))
 
     flux_fit, mu_fit, sigma_fit, alpha_fit = popt
     flux_err = float(np.sqrt(np.clip(pcov[0, 0], 0.0, np.inf)))
+    sigma_obs, alpha_obs = convolved_skew_params(sigma_fit, alpha_fit, sigma_lsf)
 
-    fwhm_ang = compute_fwhm_from_model(mu_fit, sigma_fit, alpha_fit)
-    fwhm_kms = (fwhm_ang / mu_fit) * C_KMS if np.isfinite(fwhm_ang) else np.nan
-    lya_peak = compute_peak_from_model(mu_fit, sigma_fit, alpha_fit)
+    # Intrinsic profile, for science.
+    fwhm_int_ang = compute_fwhm_from_model(mu_fit, sigma_fit, alpha_fit)
+    lya_peak_int = compute_peak_from_model(mu_fit, sigma_fit, alpha_fit)
+    # Convolved model, what MUSE sees.
+    fwhm_obs_ang = compute_fwhm_from_model(mu_fit, sigma_obs, alpha_obs)
+    lya_peak_obs = compute_peak_from_model(mu_fit, sigma_obs, alpha_obs)
+
+    fwhm_lsf_ang = sigma_lsf / FWHM_TO_SIGMA
+    at_floor = sigma_fit <= sigma_min * (1.0 + 1e-3)
+    resolved = bool(np.isfinite(fwhm_int_ang) and not at_floor
+                    and fwhm_int_ang >= resolve_frac * fwhm_lsf_ang)
+
+    def _f(x):
+        return float(x) if np.isfinite(x) else np.nan
 
     return dict(
         flux_fit=float(flux_fit), flux_fit_err=flux_err,
-        fwhm_ang=float(fwhm_ang) if np.isfinite(fwhm_ang) else np.nan,
-        fwhm_kms=float(fwhm_kms) if np.isfinite(fwhm_kms) else np.nan,
+        fwhm_int_ang=_f(fwhm_int_ang), fwhm_int_kms=_to_kms(fwhm_int_ang, mu_fit),
+        fwhm_obs_ang=_f(fwhm_obs_ang), fwhm_obs_kms=_to_kms(fwhm_obs_ang, mu_fit),
+        sigma_lsf_ang=float(sigma_lsf), fwhm_lsf_kms=_to_kms(fwhm_lsf_ang, mu_fit),
         alpha_skew=float(alpha_fit), mu=float(mu_fit), sigma=float(sigma_fit),
-        lya_peak=float(lya_peak) if np.isfinite(lya_peak) else np.nan,
+        sigma_obs=float(sigma_obs), alpha_obs=float(alpha_obs),
+        lya_peak=_f(lya_peak_obs if peak == "obs" else lya_peak_int),
+        lya_peak_int=_f(lya_peak_int), lya_peak_obs=_f(lya_peak_obs),
+        resolved=resolved,
+        skew_at_max=bool(alpha_fit >= 0.999 * alpha_max),
         fit_success=True,
     )
 
@@ -191,7 +337,7 @@ def delta_v_from_z(z_lya, z_sys):
 
 
 def assess_quality(fit, dv, lya_snr, centre, dwave, fit_window,
-                   dv_blue, dv_red, min_fwhm_kms, alpha_max):
+                   dv_blue, dv_red, alpha_max):
     """Return (quality_flag, reason_string) from fit-reliability checks.
 
     quality_flag is 1 when every check passes, 0 if any trips. reason lists the
@@ -209,13 +355,19 @@ def assess_quality(fit, dv, lya_snr, centre, dwave, fit_window,
     if np.isfinite(dv) and (dv < -dv_blue or dv > dv_red):
         reasons.append("dv_out_of_band")
 
-    # Suspiciously narrow line, at or below the instrumental resolution.
-    if np.isfinite(fit["fwhm_kms"]) and fit["fwhm_kms"] < min_fwhm_kms:
-        reasons.append("narrow_fwhm")
+    # Line not resolved by MUSE once the LSF is accounted for. This replaces
+    # the old fixed 100 km/s 'narrow_fwhm' cut, which was below the MUSE
+    # resolution at z < 5 (the LSF is ~180 km/s at z = 3, ~90 km/s at z = 6).
+    if fit["fit_success"] and not fit["resolved"]:
+        reasons.append("unresolved")
 
-    # Skew pinned at the fit bound means the fit railed rather than converged.
-    if np.isfinite(fit["alpha_skew"]) and fit["alpha_skew"] >= 0.999 * alpha_max:
-        reasons.append("skew_pinned")
+    # Intrinsic skew at alpha_max is NOT treated as a failure any more. With
+    # the LSF in the model, alpha is the intrinsic skew, and alpha >~ 5 is
+    # already close to a half-Gaussian (a blue edge sharper than MUSE can
+    # resolve). Railing at alpha_max therefore means 'maximally asymmetric',
+    # which is common for bright Lya, not 'fit did not converge'. It is
+    # recorded in the skew_at_max column instead. In the old observed-frame
+    # fit alpha could rail because it was fitting edges sharper than the LSF.
 
     # Peak within one wavelength pixel of the fit-window edge.
     if (np.isfinite(fit["lya_peak"]) and np.isfinite(centre)
@@ -279,9 +431,14 @@ def plot_fit(wave, flux, var, fit, lya_sys, lya_peak, source_id,
     ax.axhline(0.0, color="k", ls="--", lw=0.8)
 
     if fit["fit_success"] and np.isfinite(fit["mu"]):
-        model = skew_model(wave, fit["flux_fit"], fit["mu"], fit["sigma"],
-                           fit["alpha_skew"])
-        ax.plot(wave, model, color="crimson", lw=1.8, label="Skewed Gaussian")
+        model = skew_model_lsf(wave, fit["flux_fit"], fit["mu"], fit["sigma"],
+                               fit["alpha_skew"], fit["sigma_lsf_ang"])
+        ax.plot(wave, model, color="crimson", lw=1.8,
+                label=r"Skewed Gaussian $\otimes$ LSF")
+        intrinsic = skew_model(wave, fit["flux_fit"], fit["mu"], fit["sigma"],
+                               fit["alpha_skew"])
+        ax.plot(wave, intrinsic, color="crimson", lw=1.0, ls=":",
+                label="Intrinsic")
 
     ax.axvline(lya_sys, color="orange", ls="--", lw=1.8,
                label=r"Ly$\alpha$ ($z_{\rm sys}$)")
@@ -292,8 +449,13 @@ def plot_fit(wave, flux, var, fit, lya_sys, lya_peak, source_id,
     txt = []
     if np.isfinite(delta_v):
         txt.append(rf"$\Delta v = {delta_v:.0f}$ km/s")
-    if np.isfinite(fit["fwhm_kms"]):
-        txt.append(rf"FWHM $= {fit['fwhm_kms']:.0f}$ km/s")
+    if np.isfinite(fit["fwhm_int_kms"]):
+        rel = "=" if fit["resolved"] else r"$\leq$"
+        txt.append(rf"FWHM$_{{\rm int}}$ {rel} {fit['fwhm_int_kms']:.0f} km/s")
+    if np.isfinite(fit["fwhm_obs_kms"]):
+        txt.append(rf"FWHM$_{{\rm obs}}$ = {fit['fwhm_obs_kms']:.0f} km/s")
+    if np.isfinite(fit["fwhm_lsf_kms"]):
+        txt.append(rf"FWHM$_{{\rm LSF}}$ = {fit['fwhm_lsf_kms']:.0f} km/s")
     if txt:
         ax.text(0.03, 0.95, "\n".join(txt), transform=ax.transAxes,
                 va="top", ha="left", fontsize=10,
@@ -357,12 +519,23 @@ def parse_args():
 
     p.add_argument("--fit-window", type=float, default=25.0,
                    help="Fit half-width in AA about best_center (default 25).")
-    p.add_argument("--sigma-min", type=float, default=1.0,
-                   help="Minimum sigma (AA) for the fit.")
-    p.add_argument("--alpha-max", type=float, default=15.0,
-                   help="Maximum skew parameter alpha (default 15). Real Lya "
-                        "fits sit below this; fits railing at it are flagged "
-                        "skew_pinned.")
+    p.add_argument("--sigma-min", type=float, default=SIGMA_MIN_DEFAULT,
+                   help="Lower bound on the INTRINSIC sigma (AA), default "
+                        f"{SIGMA_MIN_DEFAULT}. The LSF convolution sets the "
+                        "instrumental floor, so this no longer needs to be "
+                        "~1 AA as in Paper 1.")
+    p.add_argument("--resolve-frac", type=float, default=RESOLVE_FRAC_DEFAULT,
+                   help="A line counts as resolved when FWHM_int >= this "
+                        "fraction of FWHM_LSF (default 0.5) and sigma is off "
+                        "its lower bound. Unresolved lines are flagged.")
+    p.add_argument("--alpha-max", type=float, default=ALPHA_MAX_DEFAULT,
+                   help="Maximum intrinsic skew alpha (default 15). Fits at "
+                        "this bound are recorded in skew_at_max.")
+    p.add_argument("--peak", choices=["obs", "int"], default=PEAK_DEFAULT,
+                   help="Which model peak sets z_lya and delta_v_kms. 'obs' "
+                        "(default) is the peak of the LSF-convolved model, "
+                        "'int' the intrinsic peak. Both are always written "
+                        "to their own columns.")
     p.add_argument("--plot-halfwidth", type=float, default=250.0,
                    help="Half-width (AA) of the plotted x-axis window about "
                         "systemic Lya (default 250).")
@@ -377,9 +550,6 @@ def parse_args():
     p.add_argument("--dv-red", type=float, default=1200.0,
                    help="Red edge (km/s) of the physical Delta_v band for the "
                         "quality flag. Default 1200, matches the pipeline.")
-    p.add_argument("--min-fwhm-kms", type=float, default=100.0,
-                   help="Flag lines narrower than this FWHM (km/s) as suspect. "
-                        "Default 100, approx MUSE instrumental resolution.")
     p.add_argument("--snr-threshold", type=float, default=5.0,
                    help="lya_snr at or above this sets snr_flag=1 (default 5).")
     p.add_argument("--no-plots", action="store_true",
@@ -403,6 +573,9 @@ def main():
     print(f"  Catalogue         : {os.path.abspath(args.catalog)}")
     print(f"  Output CSV        : {outfile}")
     print(f"  Figure directory  : {figdir if not args.no_plots else '(plots off)'}")
+    print(f"  LSF               : Bacon+17 Eq. 7, sigma_min = {args.sigma_min} AA, "
+          f"resolve_frac = {args.resolve_frac}")
+    print(f"  z_lya from        : {args.peak} peak")
     print("")
 
     # z_sys catalogue
@@ -477,12 +650,23 @@ def main():
             fit_window=args.fit_window,
             sigma_min=args.sigma_min,
             alpha_max=args.alpha_max,
+            resolve_frac=args.resolve_frac,
+            peak=args.peak,
         )
 
-        lya_peak = fit["lya_peak"]   # air, as measured off the MUSE cube
-        lya_peak_vac = air_to_vac(lya_peak) if np.isfinite(lya_peak) else np.nan
-        z_lya = (lya_peak_vac / LYA_REST) - 1.0 if np.isfinite(lya_peak_vac) else np.nan
-        dv = delta_v_from_z(z_lya, z_sys)
+        def peak_to_z(peak_air):
+            # Air peak off the MUSE cube -> vacuum -> z_lya -> Delta_v
+            if not np.isfinite(peak_air):
+                return np.nan, np.nan, np.nan
+            pv = float(air_to_vac(peak_air))
+            zl = pv / LYA_REST - 1.0
+            return pv, zl, delta_v_from_z(zl, z_sys)
+
+        # The peak selected by --peak sets z_lya and delta_v_kms.
+        lya_peak = fit["lya_peak"]
+        lya_peak_vac, z_lya, dv = peak_to_z(lya_peak)
+        _, z_lya_obs, dv_obs = peak_to_z(fit["lya_peak_obs"])
+        _, z_lya_int, dv_int = peak_to_z(fit["lya_peak_int"])
 
         lya_snr = float(peak_snr_by_id.get(idx, np.nan))
         snr_flag = 1 if (np.isfinite(lya_snr) and lya_snr >= args.snr_threshold) else 0
@@ -490,7 +674,7 @@ def main():
         dwave = float(np.median(np.diff(wave))) if wave.size > 1 else np.nan
         quality_flag, quality_reason = assess_quality(
             fit, dv, lya_snr, centre, dwave, args.fit_window,
-            args.dv_blue, args.dv_red, args.min_fwhm_kms, args.alpha_max,
+            args.dv_blue, args.dv_red, args.alpha_max,
         )
 
         if not args.no_plots:
@@ -507,20 +691,31 @@ def main():
             ID=idx, ra=ra, dec=dec,
             z_sys=z_sys, z_sys_source=z_src,
             z_lya=z_lya, delta_v_kms=dv,
+            z_lya_obs=z_lya_obs, delta_v_obs_kms=dv_obs,
+            z_lya_int=z_lya_int, delta_v_int_kms=dv_int,
+            peak_used=args.peak,
             lya_snr=lya_snr, snr_flag=snr_flag,
             quality_flag=quality_flag, quality_reason=quality_reason,
             lya_sys_wave=lya_sys, lya_peak_wave=lya_peak,
             lya_peak_wave_vac=lya_peak_vac,
+            lya_peak_obs_wave=fit["lya_peak_obs"],
+            lya_peak_int_wave=fit["lya_peak_int"],
             best_center=centre,
             flux_fit=fit["flux_fit"], flux_fit_err=fit["flux_fit_err"],
-            fwhm_ang=fit["fwhm_ang"], fwhm_kms=fit["fwhm_kms"],
+            fwhm_int_ang=fit["fwhm_int_ang"], fwhm_int_kms=fit["fwhm_int_kms"],
+            fwhm_obs_ang=fit["fwhm_obs_ang"], fwhm_obs_kms=fit["fwhm_obs_kms"],
+            sigma_lsf_ang=fit["sigma_lsf_ang"], fwhm_lsf_kms=fit["fwhm_lsf_kms"],
+            resolved=fit["resolved"], skew_at_max=fit["skew_at_max"],
             alpha_skew=fit["alpha_skew"], mu=fit["mu"], sigma=fit["sigma"],
+            sigma_obs=fit["sigma_obs"], alpha_obs=fit["alpha_obs"],
             fit_success=fit["fit_success"],
         ))
 
         if fit["fit_success"]:
-            print(f"[OK] Src {idx}: dv={dv:.0f} km/s  FWHM={fit['fwhm_kms']:.0f} "
-                  f"km/s  S/N={lya_snr:.1f}  Q={quality_flag} ({quality_reason})")
+            print(f"[OK] Src {idx}: dv={dv:.0f} km/s  "
+                  f"FWHM int/obs/LSF={fit['fwhm_int_kms']:.0f}/"
+                  f"{fit['fwhm_obs_kms']:.0f}/{fit['fwhm_lsf_kms']:.0f} km/s  "
+                  f"S/N={lya_snr:.1f}  Q={quality_flag} ({quality_reason})")
         else:
             print(f"[FAIL] Src {idx}: fit did not converge")
 
@@ -529,7 +724,13 @@ def main():
     print("")
     print(f"[DONE] Fitted {len(rows)} sources, "
           f"{int(out_df['fit_success'].sum()) if len(rows) else 0} successful.")
+    if len(rows):
+        ok = out_df["fit_success"].astype(bool)
+        print(f"[DONE] Resolved: {int(out_df.loc[ok, 'resolved'].sum())} of "
+              f"{int(ok.sum())} successful fits.")
     print(f"[DONE] Saved {outfile}")
+    if not args.no_plots:
+        print(f"[DONE] Fit figures in {figdir}")
 
 
 if __name__ == "__main__":

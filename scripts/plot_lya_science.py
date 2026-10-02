@@ -4,10 +4,13 @@ Science plots for one manually labelled Lya group (a, b, c or d), or all four.
 
 Reads
 -----
-  lya_group_<label>.csv              from group_lya_by_manual.py
-                                     (ID, fwhm_kms, delta_v_kms, delta_v_err_kms)
-  delta_v_from_best_zsys_line.csv    z_sys, merged on ID
-  lya_properties_mc.csv              fwhm_kms_err_mc, merged on ID
+  lya_group_<label>.csv              from group_by_manual.py, used only for
+                                     the list of IDs in the group
+  delta_v_from_best_zsys_line.csv    z_sys, delta_v_kms, delta_v_err_kms,
+                                     merged on ID
+  lya_properties_mc.csv              fwhm_int_kms, fwhm_obs_kms, their MC
+                                     errors, fwhm_lsf_kms and resolved,
+                                     merged on ID
   muv_beta_by_JELS_ID.csv            M_UV, M_UV_err, merged on ID (from
                                      fit_muv_beta.py). Only M_UV with
                                      fit_flag == ok and M_UV_err < --muv-max-err
@@ -52,6 +55,25 @@ Every one of them also has a _zbins2 version with two bins split at
                             (cf. Prieto-Lyon+25 Fig. 7 left)
   fwhm_vs_muv_zbins[2].png  the same, split by redshift, Mason+19 at each bin's
                             median z with its 0.30 dex scatter
+
+FWHM and the MUSE line spread function
+--------------------------------------
+FWHM is the intrinsic width, corrected for the MUSE LSF by forward modelling
+in fit_lya_properties_grating.py (--fwhm-kind int, the default).
+--fwhm-kind obs plots the observed, LSF-convolved width instead, and every
+output name then gains an obs_ tag (group_a_obs_dv_vs_fwhm.png) so nothing
+is overwritten.
+
+Lines MUSE does not resolve get an intrinsic FWHM upper limit of
+--resolve-frac x FWHM_LSF (default 0.5, matching the fitter). They are drawn
+as open symbols with an arrow in the scatter plots and counted at that value
+in the histograms.
+
+Which width matches each literature curve
+  Prieto-Lyon+25   corrected for instrumental resolution, compare with int.
+  Mason+19         FWHM from Delta_v via the Verhamme+18 scaling.
+  Verhamme+18      FWHM NOT corrected for instrumental broadening, so obs is
+                   the closer like-for-like comparison. Plot both if in doubt.
 
 --muv fixes the M_UV used for the Mason curves instead of the sample median.
 --density-scaling adds the Prieto-Lyon+25 (1+z)^(2/3) scaled Mason+19 curve.
@@ -111,7 +133,19 @@ plt.rcParams.update({
     "ytick.major.width": 0.8,
 })
 
-LABEL_FWHM = r"FWHM$_{\rm Ly\alpha}$ [km s$^{-1}$]"
+LABEL_FWHM = r"FWHM$_{\rm Ly\alpha,\,int}$ [km s$^{-1}$]"   # reset by set_fwhm_kind()
+LABEL_FWHM_IS_INT = True
+
+
+def set_fwhm_kind(kind):
+    """Set the FWHM axis label (and VS_MUV entry) for 'int' or 'obs'."""
+    global LABEL_FWHM, LABEL_FWHM_IS_INT
+    LABEL_FWHM_IS_INT = kind == "int"
+    LABEL_FWHM = (r"FWHM$_{\rm Ly\alpha,\,int}$ [km s$^{-1}$]" if LABEL_FWHM_IS_INT
+                  else r"FWHM$_{\rm Ly\alpha,\,obs}$ [km s$^{-1}$]")
+    if "VS_MUV" in globals():
+        VS_MUV["fwhm"] = (VS_MUV["fwhm"][0], VS_MUV["fwhm"][1], LABEL_FWHM,
+                          *VS_MUV["fwhm"][3:])
 LABEL_DV = r"$\Delta v_{\rm Ly\alpha}$ [km s$^{-1}$]"
 LABEL_Z = r"$z_{\rm sys}$"
 LABEL_MUV = r"$M_{\rm UV}$"
@@ -139,21 +173,44 @@ def panel_width(n):
 # Data
 # ---------------------------------------------------------------------------
 
-def load_group(group_csv, delta_v_csv, properties_csv, muv_csv, muv_max_err):
-    """Group CSV with z_sys, the FWHM MC error and M_UV merged on."""
-    grp = pd.read_csv(group_csv)
+def load_group(group_csv, delta_v_csv, properties_csv, muv_csv, muv_max_err,
+               fwhm_kind="int", resolve_frac=0.5):
+    """IDs from the group CSV, every value refreshed from the pipeline.
+
+    Adds 'fwhm' and 'fwhm_err' holding the chosen kind (int or obs), a boolean
+    'resolved', and M_UV. Unresolved intrinsic widths are replaced by the
+    upper limit resolve_frac x FWHM_LSF.
+    """
+    grp = pd.read_csv(group_csv)[["ID"]]
     grp["ID"] = grp["ID"].astype(int)
 
-    dv = pd.read_csv(delta_v_csv)[["ID", "z_sys"]]
+    dv = pd.read_csv(delta_v_csv)[["ID", "z_sys", "delta_v_kms",
+                                   "delta_v_err_kms"]]
     dv["ID"] = dv["ID"].astype(int)
 
-    props = pd.read_csv(properties_csv)[["ID", "fwhm_kms_err_mc"]]
+    need = ["ID", f"fwhm_{fwhm_kind}_kms", f"fwhm_{fwhm_kind}_kms_err_mc",
+            "resolved", "fwhm_lsf_kms"]
+    props = pd.read_csv(properties_csv)
+    missing = [c for c in need if c not in props.columns]
+    if missing:
+        raise KeyError(f"{missing} not in {properties_csv}. Rerun the LSF "
+                       f"version of fit_lya_properties_grating.py and "
+                       f"mc_lya_errors_grating.py first.")
+    props = props[need]
     props["ID"] = props["ID"].astype(int)
 
-    drop = [c for c in ("z_sys", "fwhm_kms_err_mc", "M_UV", "M_UV_err") if c in grp.columns]
-    df = (grp.drop(columns=drop)
-             .merge(dv, on="ID", how="left")
-             .merge(props, on="ID", how="left"))
+    df = grp.merge(dv, on="ID", how="left").merge(props, on="ID", how="left")
+    df["fwhm"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms"], errors="coerce")
+    df["fwhm_err"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms_err_mc"],
+                                   errors="coerce")
+    df["resolved"] = df["resolved"].astype(str).str.lower().isin(["true", "1"])
+    # A failed fit has no FWHM at all, so it is not an 'unresolved' line.
+    no_fit = ~np.isfinite(pd.to_numeric(df["fwhm_lsf_kms"], errors="coerce"))
+    df.loc[no_fit, "resolved"] = True
+    if fwhm_kind == "int":
+        lim = resolve_frac * pd.to_numeric(df["fwhm_lsf_kms"], errors="coerce")
+        df.loc[~df["resolved"], "fwhm"] = lim[~df["resolved"]]
+        df.loc[~df["resolved"], "fwhm_err"] = np.nan
 
     if muv_csv and os.path.exists(muv_csv):
         m = pd.read_csv(muv_csv)
@@ -167,7 +224,7 @@ def load_group(group_csv, delta_v_csv, properties_csv, muv_csv, muv_max_err):
         df["M_UV"] = np.nan
         df["M_UV_err"] = np.nan
 
-    for col in ("z_sys", "fwhm_kms", "fwhm_kms_err_mc",
+    for col in ("z_sys", "fwhm", "fwhm_err",
                 "delta_v_kms", "delta_v_err_kms", "M_UV", "M_UV_err"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -256,25 +313,60 @@ def plot_hist_zbins(values, z, bins, edges, xlabel, title, path):
     save(fig, path)
 
 
-def draw_points(ax, df, xcol, ycol, xerrcol, yerrcol, norm, cmap):
-    """Error bars in grey behind, points coloured by z_sys on top."""
+def draw_points(ax, df, xcol, ycol, xerrcol, yerrcol, norm, cmap,
+                fwhm_axis=None):
+    """Error bars in grey behind, points coloured by z_sys on top.
+
+    fwhm_axis ('x' or 'y') marks which axis carries FWHM. Unresolved lines
+    are then drawn as open symbols. For intrinsic FWHM they also get an arrow
+    marking the value as an upper limit (observed widths are measurements).
+    """
     x = df[xcol].to_numpy()
     y = df[ycol].to_numpy()
     xerr = np.nan_to_num(df[xerrcol].to_numpy(), nan=0.0)
     yerr = np.nan_to_num(df[yerrcol].to_numpy(), nan=0.0)
-    ax.errorbar(x, y, xerr=xerr, yerr=yerr, fmt="none", ecolor="0.6",
-                elinewidth=0.6, capsize=0, zorder=1)
-    return ax.scatter(x, y, c=df["z_sys"], cmap=cmap, norm=norm, s=18,
-                      edgecolor="black", linewidths=0.4, zorder=3)
+    z = df["z_sys"].to_numpy()
+    if fwhm_axis is None or "resolved" not in df.columns:
+        res = np.ones(len(df), dtype=bool)
+    else:
+        res = df["resolved"].to_numpy(dtype=bool)
+
+    ax.errorbar(x[res], y[res], xerr=xerr[res], yerr=yerr[res], fmt="none",
+                ecolor="0.6", elinewidth=0.6, capsize=0, zorder=1)
+    sc = ax.scatter(x[res], y[res], c=z[res], cmap=cmap, norm=norm, s=18,
+                    edgecolor="black", linewidths=0.4, zorder=3)
+
+    if np.any(~res):
+        u = ~res
+        if LABEL_FWHM_IS_INT:
+            fv = x if fwhm_axis == "x" else y
+            fin = fv[np.isfinite(fv)]
+            arrow = 0.08 * np.nanmax(np.abs(fin)) if fin.size else 20.0
+            if fwhm_axis == "x":
+                ax.errorbar(x[u], y[u], xerr=np.full(u.sum(), arrow),
+                            xuplims=True, yerr=yerr[u], fmt="none",
+                            ecolor="0.6", color="0.6", elinewidth=0.6,
+                            capsize=2, zorder=1)
+            else:
+                ax.errorbar(x[u], y[u], yerr=np.full(u.sum(), arrow),
+                            uplims=True, xerr=xerr[u], fmt="none",
+                            ecolor="0.6", color="0.6", elinewidth=0.6,
+                            capsize=2, zorder=1)
+        else:
+            ax.errorbar(x[u], y[u], xerr=xerr[u], yerr=yerr[u], fmt="none",
+                        ecolor="0.6", elinewidth=0.6, capsize=0, zorder=1)
+        ax.scatter(x[u], y[u], facecolors="white", edgecolors=cmap(norm(z[u])),
+                   s=18, linewidths=1.0, zorder=3)
+    return sc
 
 
 def draw_scatter(ax, df, norm, cmap):
-    return draw_points(ax, df, "fwhm_kms", "delta_v_kms", "fwhm_kms_err_mc",
-                       "delta_v_err_kms", norm, cmap)
+    return draw_points(ax, df, "fwhm", "delta_v_kms", "fwhm_err",
+                       "delta_v_err_kms", norm, cmap, fwhm_axis="x")
 
 
 def plot_dv_vs_fwhm(df, path, title):
-    d = df.dropna(subset=["fwhm_kms", "delta_v_kms", "z_sys"])
+    d = df.dropna(subset=["fwhm", "delta_v_kms", "z_sys"])
     cmap = get_cmap()
     norm = Normalize(vmin=d["z_sys"].min(), vmax=d["z_sys"].max())
     fig, ax = plt.subplots(figsize=(MNRAS_COL_WIDTH_IN, 2.9))
@@ -288,7 +380,7 @@ def plot_dv_vs_fwhm(df, path, title):
 
 
 def plot_dv_vs_fwhm_zbins(df, edges, path, title):
-    d = df.dropna(subset=["fwhm_kms", "delta_v_kms", "z_sys"])
+    d = df.dropna(subset=["fwhm", "delta_v_kms", "z_sys"])
     cmap = get_cmap()
     norm = Normalize(vmin=d["z_sys"].min(), vmax=d["z_sys"].max())
     masks, labels = zbin_masks(d["z_sys"].to_numpy(), edges)
@@ -459,7 +551,7 @@ def plot_fwhm_models(df, muv, log_edges, xmax, n_boot, rng, density, path,
     """Single panel. muv is the M_UV used for the Mason curves."""
     z_med = float(np.nanmedian(df["z_sys"]))
     fig, ax = plt.subplots(figsize=(MNRAS_COL_WIDTH_IN, 2.8))
-    info = draw_fwhm_models(ax, df["fwhm_kms"].to_numpy(), z_med, muv,
+    info = draw_fwhm_models(ax, df["fwhm"].to_numpy(), z_med, muv,
                             log_edges, xmax, n_boot, rng, density)
     ax.set_xlabel(LABEL_FWHM)
     ax.set_ylabel("N")
@@ -486,7 +578,7 @@ def plot_fwhm_models_bins(df, masks, labels, muv_fixed, muv_fallback,
         sub = df[m]
         z_med = float(np.nanmedian(sub["z_sys"])) if len(sub) else np.nan
         muv = muv_fixed if muv_fixed is not None else median_or(sub["M_UV"], muv_fallback)
-        info = (draw_fwhm_models(ax, sub["fwhm_kms"].to_numpy(), z_med, muv,
+        info = (draw_fwhm_models(ax, sub["fwhm"].to_numpy(), z_med, muv,
                                  log_edges, xmax, n_boot, rng, density)
                 if len(sub) and np.isfinite(z_med) else {"n": len(sub)})
         ax.set_title(f"{lab}\n(N = {info['n']})", fontsize=8)
@@ -523,13 +615,13 @@ def draw_verhamme(ax, fmax):
 
 
 def dv_fwhm_limit(df):
-    x = df["fwhm_kms"] + df["fwhm_kms_err_mc"].fillna(0)
+    x = df["fwhm"] + df["fwhm_err"].fillna(0)
     y = df["delta_v_kms"] + df["delta_v_err_kms"].fillna(0)
     return 1.05 * float(np.nanmax([x.max(), y.max()]))
 
 
 def plot_dv_vs_fwhm_verhamme(df, path, title):
-    d = df.dropna(subset=["fwhm_kms", "delta_v_kms", "z_sys"])
+    d = df.dropna(subset=["fwhm", "delta_v_kms", "z_sys"])
     cmap = get_cmap()
     norm = Normalize(vmin=d["z_sys"].min(), vmax=d["z_sys"].max())
     lim = dv_fwhm_limit(d)
@@ -548,7 +640,7 @@ def plot_dv_vs_fwhm_verhamme(df, path, title):
 
 
 def plot_dv_vs_fwhm_verhamme_zbins(df, edges, path, title):
-    d = df.dropna(subset=["fwhm_kms", "delta_v_kms", "z_sys"])
+    d = df.dropna(subset=["fwhm", "delta_v_kms", "z_sys"])
     cmap = get_cmap()
     norm = Normalize(vmin=d["z_sys"].min(), vmax=d["z_sys"].max())
     masks, labels = zbin_masks(d["z_sys"].to_numpy(), edges)
@@ -585,7 +677,7 @@ VS_MUV = {
     #              scatter in dex, model legend label)
     "dv": ("delta_v_kms", "delta_v_err_kms", LABEL_DV, mason18_dv,
            MASON18_SIGMA_DEX, "Mason+18"),
-    "fwhm": ("fwhm_kms", "fwhm_kms_err_mc", LABEL_FWHM, mason19_fwhm_median,
+    "fwhm": ("fwhm", "fwhm_err", LABEL_FWHM, mason19_fwhm_median,
              MASON19_SIGMA_DEX, "Mason+19"),
 }
 
@@ -627,7 +719,8 @@ def plot_vs_muv(df, quantity, path, title):
                 label=rf"{mlab}, $z={zz:g}$")
     if quantity == "fwhm":
         draw_pl25_fwhm(ax)
-    sc = draw_points(ax, d, "M_UV", col, "M_UV_err", ecol, norm, cmap)
+    sc = draw_points(ax, d, "M_UV", col, "M_UV_err", ecol, norm, cmap,
+                     fwhm_axis="y" if quantity == "fwhm" else None)
     cb = fig.colorbar(sc, ax=ax, pad=0.02)
     cb.set_label(LABEL_Z)
     ax.set_xlim(*xlim)
@@ -668,7 +761,8 @@ def plot_vs_muv_zbins(df, quantity, edges, path, title):
                     label=rf"{mlab}, $z={z_med:.2f}$")
             if quantity == "fwhm":
                 draw_pl25_fwhm(ax)
-            sc = draw_points(ax, sub, "M_UV", col, "M_UV_err", ecol, norm, cmap)
+            sc = draw_points(ax, sub, "M_UV", col, "M_UV_err", ecol, norm, cmap,
+                             fwhm_axis="y" if quantity == "fwhm" else None)
             ax.legend(frameon=False, loc="upper left", fontsize=5.5)
         ax.set_title(f"{lab}  (N = {len(sub)})", fontsize=9)
         ax.set_xlabel(LABEL_MUV)
@@ -701,6 +795,12 @@ def parse_args():
                    default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv")
     p.add_argument("--muv-csv",
                    default="/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv")
+    p.add_argument("--fwhm-kind", choices=["int", "obs"], default="int",
+                   help="Plot the intrinsic, LSF-corrected FWHM (int, default) "
+                        "or the observed FWHM (obs). obs outputs get an obs_ tag.")
+    p.add_argument("--resolve-frac", type=float, default=0.5,
+                   help="Unresolved lines get an intrinsic FWHM upper limit of "
+                        "this x FWHM_LSF. Match the fitter (default 0.5).")
     p.add_argument("--muv-max-err", type=float, default=0.5,
                    help="Only use M_UV with M_UV_err below this. Default 0.5.")
     p.add_argument("--outdir", default="/ceph/cephfs/apatrick/P2/plots")
@@ -751,6 +851,8 @@ def run_group(label, args):
     print(f"  delta_v csv     {delta_v_path}")
     print(f"  properties csv  {properties_path}")
     print(f"  M_UV csv        {muv_path}  (M_UV_err < {args.muv_max_err:g})")
+    print(f"  FWHM kind       {args.fwhm_kind} "
+          f"({'LSF corrected' if args.fwhm_kind == 'int' else 'observed, not LSF corrected'})")
     print(f"  output dir      {outdir}")
     print(f"  z bins          three: {edges3[0]:g}, {edges3[1]:g}   two: {edges2[0]:g}")
     print("")
@@ -760,21 +862,26 @@ def run_group(label, args):
         return
 
     df = load_group(group_csv, delta_v_path, properties_path, muv_path,
-                    args.muv_max_err)
+                    args.muv_max_err, args.fwhm_kind, args.resolve_frac)
     n_no_z = int(df["z_sys"].isna().sum())
     n_muv = int(df["M_UV"].notna().sum())
     print(f"[INFO] {len(df)} sources in group {label}, {n_muv} with a usable M_UV")
+    n_unres = int((~df["resolved"]).sum())
+    if n_unres:
+        print(f"[INFO] {n_unres} unresolved lines (FWHM upper limit): "
+              f"{df.loc[~df['resolved'], 'ID'].tolist()}")
     if n_no_z:
         print(f"[WARN] {n_no_z} sources have no z_sys and are left out of "
               f"the redshift-split and coloured plots")
 
     z = df["z_sys"].to_numpy()
-    fwhm = df["fwhm_kms"].to_numpy()
+    fwhm = df["fwhm"].to_numpy()
     dv = df["delta_v_kms"].to_numpy()
     muv_arr = df["M_UV"].to_numpy()
 
     os.makedirs(outdir, exist_ok=True)
-    stem = os.path.join(outdir, f"group_{label}_")
+    kind_tag = "" if args.fwhm_kind == "int" else "obs_"
+    stem = os.path.join(outdir, f"group_{label}_{kind_tag}")
     title = f"Group {label}"
     zsets = [(edges3, "zbins"), (edges2, "zbins2")]
 
@@ -871,11 +978,14 @@ def run_group(label, args):
 
 def main():
     args = parse_args()
+    set_fwhm_kind(args.fwhm_kind)
     label = args.label.strip().lower()
     labels = LABELS if label == "all" else [label]
     for lab in labels:
         run_group(lab, args)
-    print("[DONE]")
+    tag = "" if args.fwhm_kind == "int" else "obs_"
+    print(f"[DONE] figures in {os.path.abspath(args.outdir)} "
+          f"named group_<label>_{tag}*.png")
 
 
 if __name__ == "__main__":

@@ -1,2 +1,2 @@
-n_mc_attempted,n_mc_success,lya_peak_repeat,lya_peak_err_mc,z_lya_err_mc,delta_v_err_lya_kms,delta_v_err_sys_kms,delta_v_err_kms,flux_fit_err_mc,fwhm_kms_err_mc,frac_alpha_at_bound,frac_sigma_at_bound,frac_mu_at_bound,ID
-500,500,7910.6743987247255,2.3420195659867145,0.0019270460421880176,88.80453591308626,7.054833660722051,89.08432116101622,83.35476897741451,143.5559400944075,0.522,0.0,0.0,17074
+n_mc_attempted,n_mc_success,lya_peak_repeat,lya_peak_err_mc,z_lya_err_mc,delta_v_err_lya_kms,delta_v_err_sys_kms,delta_v_err_kms,flux_fit_err_mc,fwhm_int_kms_err_mc,fwhm_obs_kms_err_mc,frac_unresolved_mc,frac_alpha_at_bound,frac_sigma_at_bound,frac_mu_at_bound,ID
+500,500,7910.67402796737,2.2665401769851377,0.0018649405587948132,85.94251367301084,7.054833660722051,86.23158548012503,83.36831944584118,144.7951031040457,143.21618528020863,0.0,0.54,0.0,0.0,17074
