@@ -12,41 +12,102 @@ Per source, per grating, per line
    inside that spectrum's observed wavelength range at the DJA redshift. If
    not, skip that line for that grating.
 2. Fit a local continuum, then fit the line: a single Gaussian for Hbeta, Ha
-   and NII, or a kinematically-tied doublet blend for OII.
+   and NII, or a kinematically-tied doublet blend for OII. This is the
+   redshift fit and it is unchanged from the original version of the script,
+   so the systemic redshifts and success flags are reproduced exactly.
 3. Unlike [OIII] 4959/5007, the OII 3726/3729 flux ratio is NOT fixed by
    atomic physics (it is density-dependent, roughly 0.35-1.5), so only the
    kinematics are tied between the two OII components. Both amplitudes are
    left free.
 
-A NOTE ON LINE LABELS
-----------------------
+Flux and width measurements (added October 2026)
+-------------------------------------------------
+Hbeta. The flux and its error are read from the same single-Gaussian fit
+used for the redshift. No dust or slit-loss correction is applied here.
+
+Halpha. After the redshift fit, a second fit is run on the same spectrum.
+Halpha is fitted as a blend with [NII] 6548 and [NII] 6584:
+    - both [NII] lines share the Halpha velocity and velocity width
+      (kinematics tied to Halpha),
+    - the [NII] 6584/6548 flux ratio is fixed at NII_FLUX_RATIO.
+The Halpha flux and FWHM come from this blended fit, so [NII] is removed
+from Halpha when the lines overlap. The redshift still comes from step 2.
+
+FWHM columns, all in km/s:
+    FWHM_obs   2 sqrt(2 ln 2) * sigma_vel from the fitted Gaussian
+    FWHM_inst  c / (R * R_SCALE) at the observed Halpha wavelength, where R
+               is the nominal NIRSpec resolution curve shipped with msaexp
+               (jwst_nirspec_<grating>_disp.fits) and R_SCALE = 1.3 is the
+               compact-source factor msaexp uses by default (scale_disp),
+               after de Graaff et al. (2024)
+    FWHM_int   sqrt(FWHM_obs^2 - FWHM_inst^2). NaN, with the unresolved flag
+               set, when FWHM_obs <= FWHM_inst.
+
+A NOTE ON LINE LABELS AND WAVELENGTHS
+--------------------------------------
 Labels follow the O3_5007A convention already used for [OIII]: element +
 ionisation-stage digit, underscore, nearest integer vacuum wavelength, "A".
     Hbeta   -> H1_4861A   (vacuum 4862.683 AA)
     Ha      -> H1_6563A   (vacuum 6564.632 AA)
-    NII     -> N2_6584A   (vacuum 6585.270 AA, stronger of the doublet)
+    NII     -> N2_6548A   (vacuum 6549.860 AA), N2_6584A (vacuum 6585.270 AA)
     OII     -> O2_3726A, O2_3729A, blend O2_3729A_b
-These are user-defined labels passed straight into spec.fit.bands, not
-looked up from LiMe's own line database, so LiMe accepts them regardless.
-Still worth a quick sanity check against spec.retrieve.lines_frame() on a
-handful of sources before trusting the sample in bulk, in case your local
-LiMe build expects air rather than vacuum wavelengths baked into the label.
+LiMe only uses wavelengths from a user bands table if that table also has a
+units_wave column. Otherwise it falls back to its own database (air
+wavelengths) and then to parsing the label. N2_6584A is not in the LiMe
+database, so for the Halpha blend every component is listed in the bands
+table with an explicit vacuum wavelength and units_wave. This matters there
+because the kinematic tie fixes the [NII] centres relative to Halpha using
+these wavelengths. The redshift fits keep the original bands table, so
+their behaviour is unchanged, and z is always computed from the fitted
+observed centre and the vacuum rest wavelength.
 
 Outputs, all written fresh (old files overwritten), one pair per line
 -----------------------------------------------------------------------
-  <name>_results_by_JELS_ID.csv   one row per source: per-grating DJA z,
-                                   and for each grating actually fitted,
-                                   z_<name>_<gr>, its error, and its S/N.
-  <name>_summary_by_JELS_ID.csv   one row per source: per-grating success
-                                   flag and a <name>_success count.
-  Figures under JWST_SPECTRA_ROOT/<name>_fits/<ID>/, grouping the contsub
-  and line-fit plots for every grating of one source together.
+  <name>_results_by_JELS_ID.csv   one row per source. Original columns
+                                   (per-grating DJA z, z_<name>_<gr>, its
+                                   error and S/N) first, then the new
+                                   per-grating measurement columns.
+  <name>_summary_by_JELS_ID.csv   one row per source. Original columns
+                                   (gratings, per-grating success flags,
+                                   <name>_success count) first, then the
+                                   per-grating measurements and a best-value
+                                   selection for Ha and Hbeta.
+  Figures under JWST_SPECTRA_ROOT/<name>_fits/<ID>/, as before, plus
+  <ID>_<grating>_Ha_blend_fit.png showing the data, the Halpha and [NII]
+  components, the total model and the residuals.
+
+New columns
+-----------
+Hbeta results and summary, per grating <gr>:
+  Hbeta_<gr>_flux, Hbeta_<gr>_flux_err, Hbeta_<gr>_flux_snr
+Hbeta summary, best value (highest flux S/N):
+  Hbeta_flux_best, Hbeta_flux_best_err, Hbeta_flux_best_snr,
+  Hbeta_flux_best_grating
+Ha results and summary, per grating <gr>:
+  Ha_<gr>_flux, Ha_<gr>_flux_err, Ha_<gr>_flux_snr,
+  Ha_<gr>_fwhm_obs, Ha_<gr>_fwhm_obs_err, Ha_<gr>_fwhm_inst,
+  Ha_<gr>_fwhm_int, Ha_<gr>_fwhm_int_err, Ha_<gr>_unresolved,
+  Ha_<gr>_NII6584_flux, Ha_<gr>_NII6584_flux_err
+Ha summary, best values:
+  Ha_flux_best, Ha_flux_best_err, Ha_flux_best_snr, Ha_flux_best_grating
+      highest Halpha flux S/N across gratings
+  Ha_fwhm_obs_best, Ha_fwhm_obs_best_err, Ha_fwhm_inst_best,
+  Ha_fwhm_int_best, Ha_fwhm_int_best_err, Ha_fwhm_unresolved_best,
+  Ha_fwhm_best_grating
+      among gratings with Halpha flux S/N >= FWHM_SNR_MIN, an H grating is
+      preferred over an M grating, then the highest S/N wins
+Fluxes are in erg/s/cm2, observed (no slit-loss or dust correction).
 
 Success. A fit is successful when BOTH the detection S/N clears SNR_MIN and
 the fitted centre error is finite and below CENTRE_ERR_MAX_AA. Both
-defaults match the [OIII] script; they have not been separately validated
-per line the way lime_diagnostics.py did for [OIII], so treat them as a
-starting point.
+defaults match the [OIII] script. This is the redshift success flag only.
+Fluxes and widths are stored for every fitted spectrum, whatever the flag.
+
+Requirements
+------------
+LiMe 2.4.3, and msaexp installed in the same environment for the
+resolution curves (pip install msaexp). msaexp is located on disk only,
+never imported, so its own dependencies are not needed here.
 
 Usage
 -----
@@ -60,6 +121,7 @@ import os
 import sys
 import re
 import glob
+import importlib.util
 
 import numpy as np
 import pandas as pd
@@ -67,6 +129,7 @@ from astropy.table import Table
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 import lime
 
@@ -81,8 +144,8 @@ JWST_SPECTRA_ROOT = "/ceph/cephfs/apatrick/P2/jwst_spectra"
 GRATINGS = ["G235M_F170LP", "G235H_F170LP", "G395M_F290LP", "G395H_F290LP"]
 
 # DJA catalogue column names.
-DJA_Z_COL = "z"
 DJA_ID_COL = "ID"
+DJA_Z_COL = "z"
 
 # --- Band geometry, rest-frame Angstrom. Same as lime_OIII_jointfit.py. ---
 LINE_MARGIN = 15.0     # w3-w4 extends this far beyond each outer line
@@ -95,11 +158,28 @@ SNR_MIN = 13.0
 CENTRE_ERR_MAX_AA = 2.5
 # -------------------------------------------------------------------
 
+# --- Halpha + [NII] blend and FWHM settings. ---
+C_KMS = 299792.458
+GAUSS_FWHM = 2.0 * np.sqrt(2.0 * np.log(2.0))   # FWHM / sigma
+NII_FLUX_RATIO = 3.05     # [NII] 6584 / 6548 flux ratio, fixed by atomic physics
+R_SCALE = 1.3             # compact-source resolution factor, msaexp default
+FWHM_SNR_MIN = 5.0        # min Halpha flux S/N for a grating to supply the best FWHM
+# Local continuum for the flux fits only. LiMe's default ("central") draws a
+# straight line through the first and last pixel of the line window, so two
+# noisy pixels set the continuum. "adjacent" fits a line to both continuum
+# flanks with their errors. In tests on synthetic G395M spectra this halved
+# the Halpha flux scatter and gave errors that match it. The redshift fits
+# keep LiMe's default so z is unchanged.
+FLUX_CONT_SOURCE = "adjacent"
+# ---------------------------------------------
+
 # ----------------------------------------------------------------------
 # Line definitions. Vacuum rest wavelengths, Angstrom.
 # kind "single" fits one Gaussian. kind "doublet" fits a kinematically
 # tied blend. amp_ratio_theory is only set where the ratio is fixed by
 # atomic physics; leave None to fit both amplitudes free (OII).
+# store_flux saves the flux of the redshift fit (Hbeta).
+# ha_blend runs the extra Halpha + [NII] blend fit (Ha).
 # ----------------------------------------------------------------------
 LINES = [
     {
@@ -107,12 +187,14 @@ LINES = [
         "kind": "single",
         "label": "H1_4861A",
         "rest_vac": 4862.683,
+        "store_flux": True,
     },
     {
         "name": "Ha",
         "kind": "single",
         "label": "H1_6563A",
         "rest_vac": 6564.632,
+        "ha_blend": True,
     },
     {
         "name": "NII",
@@ -131,6 +213,15 @@ LINES = [
         "amp_ratio_theory": None,      # density-dependent, not fixed
     },
 ]
+
+# Components of the Halpha + [NII] blend. Vacuum rest wavelengths, Angstrom.
+HA_LABEL = "H1_6563A"
+NII_RED_LABEL = "N2_6584A"
+NII_BLUE_LABEL = "N2_6548A"
+HA_BLEND_LABEL = "H1_6563A_b"
+HA_REST_VAC = 6564.632
+NII_RED_REST_VAC = 6585.270
+NII_BLUE_REST_VAC = 6549.860
 # ----------------------------------------------------------------------
 
 
@@ -177,7 +268,11 @@ def get_dja_redshift(cat, src_id):
 
 
 def load_lime_spectrum(lime_path, redshift):
-    """Load the _lime.fits SPECTRUM table into a lime.Spectrum."""
+    """Load the _lime.fits SPECTRUM table into a lime.Spectrum.
+
+    Also returns the cleaned wave, flux and err arrays (Angstrom, FLAM) for
+    the blend plot.
+    """
     from astropy.io import fits
 
     with fits.open(lime_path) as hdul:
@@ -200,7 +295,7 @@ def load_lime_spectrum(lime_path, redshift):
         units_flux="FLAM",
         norm_flux=norm_flux,
     )
-    return spec, wave
+    return spec, wave, flux, err
 
 
 def single_band_df(label, rest_vac, line_margin=LINE_MARGIN,
@@ -234,6 +329,43 @@ def doublet_band_df(label, rest_vac_lo, rest_vac_hi, line_margin=LINE_MARGIN,
          "w4": [w4], "w5": [w5], "w6": [w6]},
         index=[label],
     )
+
+
+def ha_blend_band_df():
+    """Bands frame for the Halpha + [NII] blend.
+
+    The blend row carries the band limits, spanning [NII] 6548 to
+    [NII] 6584. One extra row per component gives LiMe the vacuum
+    wavelength to use for that component. units_wave must be present or
+    LiMe ignores these wavelengths (see module docstring).
+    """
+    band = doublet_band_df(HA_BLEND_LABEL, NII_BLUE_REST_VAC, NII_RED_REST_VAC)
+    band.loc[HA_BLEND_LABEL, "wavelength"] = HA_REST_VAC
+    for lab, wl in ((NII_BLUE_LABEL, NII_BLUE_REST_VAC),
+                    (HA_LABEL, HA_REST_VAC),
+                    (NII_RED_LABEL, NII_RED_REST_VAC)):
+        band.loc[lab, "wavelength"] = wl
+        for w in ("w1", "w2", "w3", "w4", "w5", "w6"):
+            band.loc[lab, w] = band.loc[HA_BLEND_LABEL, w]
+    band["units_wave"] = "Angstrom"
+    return band
+
+
+def ha_blend_fit_cfg():
+    """fit_cfg for the Halpha + [NII] blend.
+
+    Both [NII] lines take their velocity and velocity width from Halpha.
+    With kinematics tied in velocity, sigma in Angstrom scales with
+    wavelength, so the 6584/6548 amplitude ratio is the flux ratio
+    times lambda_6548 / lambda_6584.
+    """
+    amp_ratio = NII_FLUX_RATIO * NII_BLUE_REST_VAC / NII_RED_REST_VAC
+    return {
+        HA_BLEND_LABEL: f"{NII_BLUE_LABEL}+{HA_LABEL}+{NII_RED_LABEL}",
+        f"{NII_RED_LABEL}_kinem": HA_LABEL,
+        f"{NII_BLUE_LABEL}_kinem": HA_LABEL,
+        f"{NII_BLUE_LABEL}_amp": {"expr": f"{NII_RED_LABEL}_amp/{amp_ratio:.6f}"},
+    }
 
 
 def band_in_range(band_row, wave, zf):
@@ -293,22 +425,228 @@ def get_line_row(spec, label):
     return centre, centre_err, snr
 
 
+def frame_value(spec, label, col):
+    """One float from the LiMe frame, NaN if missing or not finite."""
+    if label not in spec.frame.index or col not in spec.frame.columns:
+        return np.nan
+    try:
+        v = float(spec.frame.loc[label, col])
+    except (TypeError, ValueError):
+        return np.nan
+    return v if np.isfinite(v) else np.nan
+
+
+def get_line_flux(spec, label):
+    """Gaussian profile flux, its error and flux S/N (erg/s/cm2).
+
+    LiMe de-normalises profile_flux by norm_flux when writing the frame,
+    so this is in the input FLAM x Angstrom units.
+    """
+    f = frame_value(spec, label, "profile_flux")
+    fe = frame_value(spec, label, "profile_flux_err")
+    snr = f / fe if (np.isfinite(f) and np.isfinite(fe) and fe > 0) else np.nan
+    return f, fe, snr
+
+
 def is_success(snr, centre_err_aa):
     snr_ok = np.isfinite(snr) and snr >= SNR_MIN
     err_ok = np.isfinite(centre_err_aa) and centre_err_aa <= CENTRE_ERR_MAX_AA
     return bool(snr_ok and err_ok)
 
 
+# ----------------------------------------------------------------------
+# Instrumental resolution
+# ----------------------------------------------------------------------
+_R_CURVES = {}
+
+
+def msaexp_data_dir():
+    """Locate msaexp/data on disk without importing msaexp."""
+    found = importlib.util.find_spec("msaexp")
+    if found is None or not found.submodule_search_locations:
+        raise ImportError(
+            "msaexp not found. Install it in this environment with "
+            "'pip install msaexp' (needed only for the NIRSpec resolution curves)."
+        )
+    return os.path.join(list(found.submodule_search_locations)[0], "data")
+
+
+def resolution_curve(grating):
+    """Wavelength [Angstrom] and nominal R for one grating, cached."""
+    key = grating_short(grating).lower()
+    if key not in _R_CURVES:
+        path = os.path.join(msaexp_data_dir(), f"jwst_nirspec_{key}_disp.fits")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Resolution curve not found: {path}")
+        tab = Table.read(path)
+        wave_aa = np.asarray(tab["WAVELENGTH"], dtype=float) * 1e4   # micron -> AA
+        _R_CURVES[key] = (wave_aa, np.asarray(tab["R"], dtype=float))
+    return _R_CURVES[key]
+
+
+def instrumental_fwhm_kms(grating, wave_obs_aa):
+    """Instrumental FWHM in km/s at an observed wavelength."""
+    if not np.isfinite(wave_obs_aa):
+        return np.nan
+    wave_aa, r_nom = resolution_curve(grating)
+    r_eff = np.interp(wave_obs_aa, wave_aa, r_nom) * R_SCALE
+    return C_KMS / r_eff
+
+
+def intrinsic_fwhm(fwhm_obs, fwhm_obs_err, fwhm_inst):
+    """Quadrature-subtracted FWHM, its error, and an unresolved flag."""
+    if not (np.isfinite(fwhm_obs) and np.isfinite(fwhm_inst)):
+        return np.nan, np.nan, False
+    if fwhm_obs <= fwhm_inst:
+        return np.nan, np.nan, True
+    fwhm_int = np.sqrt(fwhm_obs ** 2 - fwhm_inst ** 2)
+    err = fwhm_obs * fwhm_obs_err / fwhm_int if np.isfinite(fwhm_obs_err) else np.nan
+    return fwhm_int, err, False
+
+
+# ----------------------------------------------------------------------
+# Halpha + [NII] blend
+# ----------------------------------------------------------------------
+def gaussian(x, flux, centre, sigma):
+    return flux / (np.sqrt(2.0 * np.pi) * sigma) * np.exp(-0.5 * ((x - centre) / sigma) ** 2)
+
+
+def plot_ha_blend(spec, wave, flux, err, zf, band, src_id, grating, png):
+    """Data, Halpha and [NII] components, total model and residuals."""
+    row = band.loc[HA_BLEND_LABEL]
+    lo, hi = float(row["w1"]) * zf, float(row["w6"]) * zf
+    sel = (wave >= lo) & (wave <= hi)
+    x, y, e = wave[sel], flux[sel], err[sel]
+
+    # Local linear continuum as fitted by LiMe (de-normalised in the frame).
+    m = frame_value(spec, HA_LABEL, "m_cont")
+    n = frame_value(spec, HA_LABEL, "n_cont")
+    if np.isfinite(m) and np.isfinite(n):
+        cont = m * x + n
+    else:
+        cont = np.full_like(x, frame_value(spec, HA_LABEL, "cont"))
+
+    xf = np.linspace(x.min(), x.max(), 2000)
+    cont_f = (m * xf + n) if (np.isfinite(m) and np.isfinite(n)) else np.full_like(xf, cont[0])
+
+    comps = [
+        (HA_LABEL, r"H$\alpha$", "tab:red"),
+        (NII_BLUE_LABEL, r"[NII] 6548", "tab:blue"),
+        (NII_RED_LABEL, r"[NII] 6584", "tab:blue"),
+    ]
+    total_f = cont_f.copy()
+    total_d = cont.copy()
+    comp_curves = []
+    for lab, name, col in comps:
+        f = frame_value(spec, lab, "profile_flux")
+        c = frame_value(spec, lab, "center")
+        s = frame_value(spec, lab, "sigma")
+        if np.isfinite(f) and np.isfinite(c) and np.isfinite(s) and s > 0:
+            g_f = gaussian(xf, f, c, s)
+            total_f += g_f
+            total_d += gaussian(x, f, c, s)
+            comp_curves.append((name, col, g_f, lab))
+
+    fig, (ax, axr) = plt.subplots(
+        2, 1, figsize=(8, 6), sharex=True,
+        gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+    )
+    ax.step(x, y, where="mid", color="k", lw=1, label="data", zorder=2)
+    ax.fill_between(x, y - e, y + e, step="mid", color="0.8", lw=0, zorder=1)
+    ax.plot(xf, total_f, color="tab:orange", lw=2.5, alpha=0.6,
+            label="total model", zorder=3)
+    ax.plot(xf, cont_f, color="0.4", ls=":", lw=1, label="continuum", zorder=4)
+    for name, col, g_f, lab in comp_curves:
+        ls = "-" if lab == HA_LABEL else "--"
+        ax.plot(xf, cont_f + g_f, color=col, ls=ls, lw=1.2, label=name, zorder=5)
+    for wl in (NII_BLUE_REST_VAC, HA_REST_VAC, NII_RED_REST_VAC):
+        ax.axvline(wl * zf, color="0.7", lw=0.6, ls="-.", zorder=0)
+    # continuum flanks used for the local continuum fit
+    for a, b in (("w1", "w2"), ("w5", "w6")):
+        ax.axvspan(float(row[a]) * zf, float(row[b]) * zf, color="0.5", alpha=0.12, lw=0)
+        axr.axvspan(float(row[a]) * zf, float(row[b]) * zf, color="0.5", alpha=0.12, lw=0)
+
+    fha, fha_e, snr_ha = get_line_flux(spec, HA_LABEL)
+    fn2, fn2_e, snr_n2 = get_line_flux(spec, NII_RED_LABEL)
+    ax.set_title(
+        f"ID {src_id}  {grating}\n"
+        f"Ha flux {fha:.3e} +/- {fha_e:.2e} (S/N {snr_ha:.1f})   "
+        f"[NII]6584 {fn2:.3e} +/- {fn2_e:.2e} (S/N {snr_n2:.1f})",
+        fontsize=9,
+    )
+    ax.set_ylabel(r"$f_\lambda$ [erg s$^{-1}$ cm$^{-2}$ $\AA^{-1}$]")
+    ax.legend(fontsize=8, loc="upper right")
+
+    axr.step(x, (y - total_d) / e, where="mid", color="k", lw=1)
+    axr.axhline(0, color="tab:orange", lw=1)
+    axr.set_ylabel(r"resid / $\sigma$")
+    axr.set_xlabel(r"observed wavelength [$\AA$]")
+    fig.savefig(png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def fit_ha_blend(spec, wave, flux, err, zf, grating, src_id, fdir):
+    """Second fit: Halpha with [NII] 6548, 6584. Returns a dict of results.
+
+    Runs on the Spectrum already used for the redshift fit, after that
+    fit's results have been read, so it cannot change the redshift.
+    """
+    band = ha_blend_band_df()
+    if not band_in_range(band.loc[HA_BLEND_LABEL], wave, zf):
+        print("    Ha blend  out of range (NII flanks fall off the spectrum)")
+        return {"blend_status": "out_of_range"}
+
+    spec.fit.bands(HA_BLEND_LABEL, bands=band, fit_cfg=ha_blend_fit_cfg(),
+                   cont_source=FLUX_CONT_SOURCE)
+
+    gr = grating_short(grating)
+    f_ha, f_ha_e, snr_ha = get_line_flux(spec, HA_LABEL)
+    f_n2, f_n2_e, _ = get_line_flux(spec, NII_RED_LABEL)
+
+    sig_v = frame_value(spec, HA_LABEL, "sigma_vel")
+    sig_v_e = frame_value(spec, HA_LABEL, "sigma_vel_err")
+    fwhm_obs = GAUSS_FWHM * sig_v
+    fwhm_obs_e = GAUSS_FWHM * sig_v_e
+    centre_obs = frame_value(spec, HA_LABEL, "center")
+    fwhm_inst = instrumental_fwhm_kms(grating, centre_obs)
+    fwhm_int, fwhm_int_e, unresolved = intrinsic_fwhm(fwhm_obs, fwhm_obs_e, fwhm_inst)
+
+    print(f"    Ha blend  flux {f_ha:.3e} +/- {f_ha_e:.2e} (S/N {snr_ha:.1f})  "
+          f"[NII]6584 {f_n2:.3e}  FWHM obs {fwhm_obs:.0f}  inst {fwhm_inst:.0f}  "
+          f"int {fwhm_int:.0f} km/s  unresolved {unresolved}")
+
+    png = os.path.join(fdir, f"{src_id}_{grating}_Ha_blend_fit.png")
+    plot_ha_blend(spec, wave, flux, err, zf, band, src_id, grating, png)
+    print(f"    figure    {png}")
+
+    return {
+        "blend_status": "fitted",
+        f"Ha_{gr}_flux": f_ha,
+        f"Ha_{gr}_flux_err": f_ha_e,
+        f"Ha_{gr}_flux_snr": snr_ha,
+        f"Ha_{gr}_fwhm_obs": fwhm_obs,
+        f"Ha_{gr}_fwhm_obs_err": fwhm_obs_e,
+        f"Ha_{gr}_fwhm_inst": fwhm_inst,
+        f"Ha_{gr}_fwhm_int": fwhm_int,
+        f"Ha_{gr}_fwhm_int_err": fwhm_int_e,
+        f"Ha_{gr}_unresolved": unresolved,
+        f"Ha_{gr}_NII6584_flux": f_n2,
+        f"Ha_{gr}_NII6584_flux_err": f_n2_e,
+    }
+
+
 def fit_one_line(lime_path, z_dja, line):
     """Fit one line in one spectrum.
 
     Returns a dict with status 'fitted' or 'out_of_range', plus z, z_err,
-    snr, success for 'fitted'. Raises on genuine fit errors.
+    snr, success for 'fitted', and a 'meas' dict of any extra flux and
+    width columns. Raises on genuine fit errors.
     """
     src_id, grating = parse_id_grating(lime_path)
+    gr = grating_short(grating)
     name = line["name"]
 
-    spec, wave = load_lime_spectrum(lime_path, z_dja)
+    spec, wave, flux, err = load_lime_spectrum(lime_path, z_dja)
     zf = 1.0 + z_dja
 
     if line["kind"] == "single":
@@ -333,6 +671,7 @@ def fit_one_line(lime_path, z_dja, line):
     spec.fit.continuum(degree_list=[3, 4], emis_threshold=[3, 2])
     spec.plot.spectrum(fname=contsub_png)
 
+    # ---- Redshift fit, unchanged ----
     if line["kind"] == "single":
         spec.fit.bands(line["label"], bands=band)
     else:
@@ -349,13 +688,107 @@ def fit_one_line(lime_path, z_dja, line):
 
     spec.plot.bands(ref_label, fname=fit_png)
 
+    # ---- Extra measurements ----
+    meas = {}
+    if line.get("store_flux"):
+        # Refit with the flank continuum for the flux. z already read above.
+        spec.fit.bands(line["label"], bands=band, cont_source=FLUX_CONT_SOURCE)
+        f, fe, fsnr = get_line_flux(spec, ref_label)
+        meas = {f"{name}_{gr}_flux": f,
+                f"{name}_{gr}_flux_err": fe,
+                f"{name}_{gr}_flux_snr": fsnr}
+        print(f"    {name}  flux {f:.3e} +/- {fe:.2e} erg/s/cm2 (S/N {fsnr:.1f})")
+
+    if line.get("ha_blend"):
+        try:
+            b = fit_ha_blend(spec, wave, flux, err, zf, grating, src_id, fdir)
+        except Exception as e:
+            print(f"    Ha blend  FAILED  reason: {e}")
+            b = {"blend_status": "failed"}
+        meas = {k: v for k, v in b.items() if k != "blend_status"}
+
     return {
         "status": "fitted",
         "z": z_line,
         "z_err": z_line_err,
         "snr": snr,
         "success": success,
+        "meas": meas,
     }
+
+
+# ----------------------------------------------------------------------
+# Best-value selection across gratings
+# ----------------------------------------------------------------------
+def pick_best_flux(row, name, grs):
+    """Highest flux S/N across gratings. Returns (grating, flux, err, snr)."""
+    best = (None, np.nan, np.nan, np.nan)
+    for gr in grs:
+        snr = row.get(f"{name}_{gr}_flux_snr", np.nan)
+        if snr is None or not np.isfinite(snr):
+            continue
+        if best[0] is None or snr > best[3]:
+            best = (gr, row.get(f"{name}_{gr}_flux"),
+                    row.get(f"{name}_{gr}_flux_err"), snr)
+    return best
+
+
+def pick_best_fwhm_grating(row, grs):
+    """Among gratings with Ha flux S/N >= FWHM_SNR_MIN, prefer H over M,
+    then the highest S/N."""
+    cands = []
+    for gr in grs:
+        snr = row.get(f"Ha_{gr}_flux_snr", np.nan)
+        fwhm = row.get(f"Ha_{gr}_fwhm_obs", np.nan)
+        if snr is None or fwhm is None or not (np.isfinite(snr) and np.isfinite(fwhm)):
+            continue
+        if snr < FWHM_SNR_MIN:
+            continue
+        cands.append((gr.endswith("H"), snr, gr))
+    if not cands:
+        return None
+    return max(cands)[2]
+
+
+def add_best_columns(sum_df, line):
+    """Append best-value columns to the summary frame for Ha and Hbeta."""
+    name = line["name"]
+    grs = [grating_short(g) for g in GRATINGS]
+    out = {}
+    for idx, row in sum_df.iterrows():
+        row = row.to_dict()
+        gr, f, fe, snr = pick_best_flux(row, name, grs)
+        out.setdefault(f"{name}_flux_best", []).append(f)
+        out.setdefault(f"{name}_flux_best_err", []).append(fe)
+        out.setdefault(f"{name}_flux_best_snr", []).append(snr)
+        out.setdefault(f"{name}_flux_best_grating", []).append(gr)
+
+        if line.get("ha_blend"):
+            g = pick_best_fwhm_grating(row, grs)
+            for suff, outcol in (("fwhm_obs", "Ha_fwhm_obs_best"),
+                                 ("fwhm_obs_err", "Ha_fwhm_obs_best_err"),
+                                 ("fwhm_inst", "Ha_fwhm_inst_best"),
+                                 ("fwhm_int", "Ha_fwhm_int_best"),
+                                 ("fwhm_int_err", "Ha_fwhm_int_best_err")):
+                out.setdefault(outcol, []).append(
+                    row.get(f"Ha_{g}_{suff}", np.nan) if g else np.nan)
+            out.setdefault("Ha_fwhm_unresolved_best", []).append(
+                row.get(f"Ha_{g}_unresolved", np.nan) if g else np.nan)
+            out.setdefault("Ha_fwhm_best_grating", []).append(g)
+
+    for col, vals in out.items():
+        sum_df[col] = vals
+    return sum_df
+
+
+def meas_suffixes(line):
+    if line.get("ha_blend"):
+        return ["flux", "flux_err", "flux_snr", "fwhm_obs", "fwhm_obs_err",
+                "fwhm_inst", "fwhm_int", "fwhm_int_err", "unresolved",
+                "NII6584_flux", "NII6584_flux_err"]
+    if line.get("store_flux"):
+        return ["flux", "flux_err", "flux_snr"]
+    return []
 
 
 def run_all(spectra_root, line):
@@ -422,30 +855,46 @@ def run_all(spectra_root, line):
             if r["success"]:
                 summary[src_id][f"{name}_success"] += 1
 
+            results[src_id].update(r["meas"])
+            summary[src_id].update(r["meas"])
+
     for src_id, grs in gratings_seen.items():
         summary[src_id]["gratings"] = ", ".join(grs)
 
-    res_df = pd.DataFrame(list(results.values())).sort_values("ID")
+    grs_all = [grating_short(g) for g in GRATINGS]
+    meas_cols = [f"{name}_{gr}_{s}" for gr in grs_all for s in meas_suffixes(line)]
+
+    # ---- Results CSV: original columns first, new measurements after ----
+    res_df = pd.DataFrame(list(results.values()))
+    if len(res_df):
+        res_df = res_df.sort_values("ID")
     res_cols = ["ID"]
-    for gr in [grating_short(g) for g in GRATINGS]:
+    for gr in grs_all:
         if f"z_{gr}" in res_df.columns:
             res_cols.append(f"z_{gr}")
-    for gr in [grating_short(g) for g in GRATINGS]:
+    for gr in grs_all:
         for suff in ("", "_err", "_snr"):
             c = f"z_{name}_{gr}{suff}"
             if c in res_df.columns:
                 res_cols.append(c)
+    res_cols += [c for c in meas_cols if c in res_df.columns]
     res_df = res_df.reindex(columns=res_cols)
     res_df.to_csv(results_csv(line), index=False)
 
-    sum_df = pd.DataFrame(list(summary.values())).sort_values("ID")
+    # ---- Summary CSV: original columns first, then measurements and best ----
+    sum_df = pd.DataFrame(list(summary.values()))
+    if len(sum_df):
+        sum_df = sum_df.sort_values("ID")
     sum_cols = ["ID", "gratings"]
-    for gr in [grating_short(g) for g in GRATINGS]:
+    for gr in grs_all:
         c = f"{name}_{gr}_success"
         if c in sum_df.columns:
             sum_cols.append(c)
     sum_cols.append(f"{name}_success")
+    sum_cols += [c for c in meas_cols if c in sum_df.columns]
     sum_df = sum_df.reindex(columns=sum_cols)
+    if meas_suffixes(line) and len(sum_df):
+        sum_df = add_best_columns(sum_df, line)
     sum_df.to_csv(summary_csv(line), index=False)
 
     print("\n" + "=" * 60)
@@ -453,9 +902,13 @@ def run_all(spectra_root, line):
     print(f"  sources processed   {len(results)}")
     if len(sum_df):
         print(f"  with >=1 success    {int((sum_df[f'{name}_success'] > 0).sum())}")
-    print(f"  results csv         {results_csv(line)}")
-    print(f"  summary csv         {summary_csv(line)}")
-    print(f"  figures root        {fig_root(line)}")
+        if f"{name}_flux_best" in sum_df.columns:
+            print(f"  with a flux         {int(sum_df[f'{name}_flux_best'].notna().sum())}")
+        if "Ha_fwhm_obs_best" in sum_df.columns:
+            print(f"  with a best FWHM    {int(sum_df['Ha_fwhm_obs_best'].notna().sum())}")
+    print(f"  results csv         {os.path.abspath(results_csv(line))}")
+    print(f"  summary csv         {os.path.abspath(summary_csv(line))}")
+    print(f"  figures root        {os.path.abspath(fig_root(line))}")
     print("=" * 60)
 
 
@@ -466,11 +919,13 @@ def main():
     print(f"  spectra root   {spectra_root}")
     print(f"  catalogue dir  {CATALOG_DIR}")
     print("  lines          " + ", ".join(l["name"] for l in LINES))
+    if any(l.get("ha_blend") for l in LINES):
+        print(f"  resolution     {msaexp_data_dir()}  (R x {R_SCALE})")
     print("  output files")
     for line in LINES:
-        print(f"    {results_csv(line)}")
-        print(f"    {summary_csv(line)}")
-        print(f"    {fig_root(line)}/<ID>/")
+        print(f"    {os.path.abspath(results_csv(line))}")
+        print(f"    {os.path.abspath(summary_csv(line))}")
+        print(f"    {os.path.abspath(fig_root(line))}/<ID>/")
 
     for line in LINES:
         os.makedirs(fig_root(line), exist_ok=True)
