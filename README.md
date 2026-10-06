@@ -3,7 +3,7 @@
 Spectroscopy of Lyα emitters at 3 < z < 6 with VLT/MUSE and JWST/NIRSpec. Every script lives in this folder and is run from the terminal on the cluster.
 
 ```bash
-conda activate env39
+conda activate env39 (or env312 for the lime fits)
 cd /ceph/cephfs/apatrick/P2/scripts
 ```
 
