@@ -5,3 +5,7 @@ __pycache__/
 data/
 *.npy
 *.pdf
+
+# SLURM and runtime logs
+*.log
+*.err
