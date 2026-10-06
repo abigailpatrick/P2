@@ -3,20 +3,16 @@
 Recompute the Lya velocity offset using the best available systemic line per
 source, without re-fitting or re-bootstrapping Lya.
 
-For each source, z_sys is chosen by trying lines in this fixed priority order,
-taking the first one that is usable:
+For each source, z_sys comes from p2_common.pick_zsys, the rule shared by
+the whole pipeline:
 
-    1. OIII   (only if grade a, i.e. z_OIII_snr >= OIII_SNR_MIN)
-    2. Ha
-    3. Hbeta
-    4. NII
-    5. OII
+    1. [OIII] if z_OIII_snr > 13
+    2. Halpha if z_Ha_snr   > 13
+    3. otherwise no z_sys
 
-Steps 2-5 need no further success check here: systemic_redshifts_by_JELS_ID.csv
-(written by merge_systemic_redshifts.py) already only carries a z_<line> value
-for a source when that line's own summary CSV flagged it a success, and it
-already picked the highest-S/N grating where more than one succeeded. This
-script just reads whichever z_<line> column is populated.
+systemic_redshifts_by_JELS_ID.csv (written by merge_systemic_redshifts.py)
+already only carries a z_<line> value when that line's fit was flagged a
+success, and it already picked the highest-S/N grating.
 
 z_lya, z_lya_err_mc (the bootstrap error on the Lya line centre) and lya_snr
 come straight from lya_properties_mc.csv. z_lya is the peak of the
@@ -31,13 +27,13 @@ re-run. Only the two things that do depend on z_sys are recomputed:
     delta_v_err_lya_kms  = c * z_lya_err_mc / (1 + z_sys)     [reusing z_lya_err_mc]
     delta_v_err_kms      = sqrt(delta_v_err_sys_kms^2 + delta_v_err_lya_kms^2)
 
-A source with no usable line in any of the five gets delta_v_kms, its errors,
-and z_sys_line left blank.
+A source with no z_sys gets delta_v_kms, its errors and z_sys_line left
+blank.
 
 Inputs
 ------
   systemic_redshifts_by_JELS_ID.csv   ID, z_<line>, z_<line>_err, z_<line>_snr
-                                       for line in OIII, Ha, Hbeta, NII, OII
+                                       for line in OIII and Ha
   lya_properties_mc.csv               ID, z_lya, z_lya_err_mc, lya_snr,
                                        fit_success, ra, dec
 
@@ -56,17 +52,16 @@ import os
 import numpy as np
 import pandas as pd
 
-C_KMS = 299792.458
+import p2_common as pc
 
-# Priority order. OIII is gated on SNR, the rest are gated only on presence,
-# since systemic_redshifts_by_JELS_ID.csv already filters on success.
-LINE_PRIORITY = ["OIII", "Ha", "Hbeta", "NII", "OII"]
+C_KMS = 299792.458
+LINE_PRIORITY = pc.LINE_PRIORITY
 
 
 def parse_args():
     p = argparse.ArgumentParser(
         description="Recompute Delta_v using the best available systemic "
-                    "line per source (OIII grade a, then Ha, Hbeta, NII, OII).")
+                    "line per source (OIII S/N > 13, then Ha S/N > 13).")
     p.add_argument("--systemic-csv",
                    default="/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv",
                    help="Per-line systemic redshift table.")
@@ -76,39 +71,20 @@ def parse_args():
     p.add_argument("--out-csv",
                    default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv",
                    help="Output CSV.")
-    p.add_argument("--oiii-snr-min", type=float, default=13.0,
-                   help="OIII is only accepted (grade a) at or above this S/N. "
-                        "Below it, or if OIII is missing, the script falls "
-                        "through to Ha. Default 13, matching the rest of the "
-                        "P2 pipeline.")
+    p.add_argument("--oiii-snr-min", type=float, default=pc.SNR_MIN["OIII"],
+                   help="[OIII] is used only above this S/N. Default 13.")
+    p.add_argument("--ha-snr-min", type=float, default=pc.SNR_MIN["Ha"],
+                   help="Halpha is used only above this S/N. Default 13.")
     p.add_argument("--lya-rest", type=float, default=1215.67,
                    help="Vacuum rest wavelength of Lya, Angstrom.")
     return p.parse_args()
 
 
-def pick_zsys(row, oiii_snr_min):
-    """Return (z_sys, z_sys_err, z_sys_snr, z_sys_line) for one source.
-
-    Walks LINE_PRIORITY in order. OIII additionally requires z_OIII_snr to
-    clear oiii_snr_min (the 'grade a' condition); every other line is
-    accepted on presence alone, since the systemic CSV already only carries
-    a value there for a successful fit.
-    """
-    for line in LINE_PRIORITY:
-        z = row.get(f"z_{line}")
-        if pd.isna(z):
-            continue
-
-        if line == "OIII":
-            snr = row.get("z_OIII_snr")
-            if pd.isna(snr) or float(snr) < oiii_snr_min:
-                continue
-
-        z_err = row.get(f"z_{line}_err")
-        z_snr = row.get(f"z_{line}_snr")
-        return float(z), float(z_err), float(z_snr), line
-
-    return np.nan, np.nan, np.nan, None
+def pick_zsys(row, cuts):
+    """Return (z_sys, z_sys_err, z_sys_snr, z_sys_line) for one source,
+    using the shared rule in p2_common.pick_zsys."""
+    z, z_err, z_snr, line, _ = pc.pick_zsys(row, cuts)
+    return z, z_err, z_snr, line
 
 
 def main():
@@ -122,7 +98,8 @@ def main():
     print(f"  systemic csv    {systemic_path}")
     print(f"  lya csv         {lya_path}")
     print(f"  output csv      {out_path}")
-    print(f"  OIII grade-a    snr >= {args.oiii_snr_min:g}")
+    cuts = {"OIII": args.oiii_snr_min, "Ha": args.ha_snr_min}
+    print(f"  z_sys rule      {pc.rule_text(cuts)}")
     print("")
 
     systemic = pd.read_csv(systemic_path)
@@ -179,7 +156,7 @@ def main():
             continue
 
         z_sys, z_sys_err, z_sys_snr, z_sys_line = pick_zsys(
-            systemic.loc[src_id], args.oiii_snr_min)
+            systemic.loc[src_id], cuts)
 
         if z_sys_line is None:
             n_none += 1
