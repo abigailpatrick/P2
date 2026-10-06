@@ -720,6 +720,13 @@ def main():
             print(f"[FAIL] Src {idx}: fit did not converge")
 
     out_df = pd.DataFrame(rows)
+    if args.id is not None and os.path.exists(outfile):
+        # Single-source rerun: replace only this source's row so the rest of
+        # the catalogue is kept (previously the file was cut to one row).
+        old = pd.read_csv(outfile)
+        old = old[old["ID"].astype(int) != int(args.id)]
+        out_df = pd.concat([old, out_df], ignore_index=True).sort_values("ID")
+        print(f"[INFO] --id {args.id}: replaced its row, other rows kept")
     out_df.to_csv(outfile, index=False)
     print("")
     print(f"[DONE] Fitted {len(rows)} sources, "

@@ -28,7 +28,8 @@ each composite is scaled so its peak within --peak-window km/s is 1.
 z_sys is NOT taken from the .npz or from grating_sources_with_zsys.csv (both
 can be stale). It is recomputed here from systemic_redshifts_by_JELS_ID.csv
 with the priority used by find_delta_v_from_best_zsys_line.py:
-    OIII (z_OIII_snr >= --oiii-snr-min), then Ha, Hbeta, NII, OII.
+    [OIII] (S/N > --oiii-snr-min), then Halpha (S/N > --ha-snr-min), else none,
+via the shared rule in p2_common.pick_zsys.
 
 Sample
 ------
@@ -66,7 +67,9 @@ import matplotlib.pyplot as plt
 
 LYA_REST = 1215.67          # AA, vacuum
 C_KMS = 299792.458
-LINE_PRIORITY = ["OIII", "Ha", "Hbeta", "NII", "OII"]
+import p2_common as pc  # shared z_sys rule
+
+LINE_PRIORITY = pc.LINE_PRIORITY
 
 DEFAULT_EXCLUDE = [42990, 43604, 49296, 49694, 48086]
 
@@ -94,7 +97,8 @@ def parse_args():
     p.add_argument("--outdir",
                    default="/ceph/cephfs/apatrick/P2/plots/stacks")
 
-    p.add_argument("--oiii-snr-min", type=float, default=13.0)
+    p.add_argument("--oiii-snr-min", type=float, default=pc.SNR_MIN["OIII"])
+    p.add_argument("--ha-snr-min", type=float, default=pc.SNR_MIN["Ha"])
     p.add_argument("--z-split", type=float, default=3.5)
     p.add_argument("--muv-split", type=float, default=-19.0)
     p.add_argument("--exclude", type=int, nargs="*", default=DEFAULT_EXCLUDE)
@@ -127,16 +131,10 @@ def air_to_vac(wave_air):
     return wave_air * n
 
 
-def best_zsys(row, oiii_snr_min):
-    """(z, z_err, line) by the find_delta_v_from_best_zsys_line.py priority."""
-    for line in LINE_PRIORITY:
-        z = row.get(f"z_{line}")
-        if not np.isfinite(z):
-            continue
-        if line == "OIII" and not (row.get("z_OIII_snr", np.nan) >= oiii_snr_min):
-            continue
-        return z, row.get(f"z_{line}_err", np.nan), line
-    return np.nan, np.nan, None
+def best_zsys(row, cuts):
+    """(z, z_err, line) from the shared rule in p2_common.pick_zsys."""
+    z, z_err, _, line, _ = pc.pick_zsys(row, cuts)
+    return z, z_err, line
 
 
 def rest_frame_spectrum(path, z, grid, ao_gap):
@@ -227,7 +225,7 @@ def main():
     for t in (sysz, grat, lya, muv):
         t["ID"] = t["ID"].astype(int)
 
-    z = sysz.apply(lambda r: pd.Series(best_zsys(r, args.oiii_snr_min),
+    z = sysz.apply(lambda r: pd.Series(best_zsys(r, {"OIII": args.oiii_snr_min, "Ha": args.ha_snr_min}),
                                        index=["z_sys", "z_sys_err", "z_sys_line"]),
                    axis=1)
     cat = pd.concat([sysz[["ID"]], z], axis=1)

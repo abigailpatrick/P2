@@ -31,10 +31,10 @@ Per-source overrides (all optional)
 
 Examples
 --------
-python lime_OIII_single_review.py 59737
-python lime_OIII_single_review.py 59737 --z 5.9412
-python lime_OIII_single_review.py 59737 --z 5.9412 --line-margin 25
-python lime_OIII_single_review.py 59737 --gratings G235M --force-single --dry-run
+python lime_OIII_singlereview.py 59737
+python lime_OIII_singlereview.py 59737 --z 5.9412
+python lime_OIII_singlereview.py 59737 --z 5.9412 --line-margin 25
+python lime_OIII_singlereview.py 59737 --gratings G235M --force-single --dry-run
 
 The band shift you usually want is --z. Widen the windows only when needed.
 """

@@ -115,6 +115,11 @@ def main():
                    default="/ceph/cephfs/apatrick/P2/MUSE_catalogs")
     p.add_argument("--grouping-dir", default=script_dir,
                    help="Directory containing group_lya_sample.py.")
+    p.add_argument("--labels-csv",
+                   default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_manual_labels.csv",
+                   help="Hand-edited label file from update_manual_labels.py. "
+                        "When it exists its labels replace the 'manual' column "
+                        "of the tier CSVs.")
     args = p.parse_args()
 
     tier_dir = os.path.abspath(args.tier_dir)
@@ -137,6 +142,13 @@ def main():
 
     print("[READ]")
     df = read_tier_csvs(tier_dir)
+    labels = gls.read_label_file(os.path.abspath(args.labels_csv))
+    if labels is not None:
+        print(f"  labels from  {os.path.abspath(args.labels_csv)}")
+        df["manual"] = df["ID"].astype(int).map(labels).fillna("")
+    else:
+        print(f"  no label file at {os.path.abspath(args.labels_csv)}, "
+              f"using the 'manual' column of the tier CSVs")
     print("")
 
     # Clean labels and report anything unexpected

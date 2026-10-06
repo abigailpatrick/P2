@@ -40,9 +40,9 @@ trusted from the header.
 
 Redshift
 --------
-z_sys from systemic_redshifts_by_JELS_ID.csv, using the same line priority as
-find_delta_v_from_best_zsys_line.py (OIII if S/N >= 13, then Ha, Hbeta, NII,
-OII). If no line is usable, z_av from grating_sources_by_JELS_ID.csv.
+z_sys from systemic_redshifts_by_JELS_ID.csv with the shared rule in
+p2_common.pick_zsys ([OIII] if S/N > 13, then Halpha if S/N > 13). If neither
+passes, z_av from grating_sources_by_JELS_ID.csv.
 
 Catalogue lookup
 ----------------
@@ -60,7 +60,7 @@ Where the numbers come from
   f_lambda = f_nu c / lambda^2         standard, c exact SI value
   M_UV distance modulus + 2.5log(1+z)  Hogg et al. (2002)
   H0 = 70, Om = 0.3                    Paper 1
-  OIII S/N >= 13 and line priority     find_delta_v_from_best_zsys_line.py
+  z_sys rule (OIII, Ha, S/N > 13)      p2_common.py
   1250 A Lya cut, >= 2 filters         adopted here, not from a reference
 
 Outputs
@@ -158,7 +158,9 @@ def build_filter_table():
 
 FILTERS = build_filter_table()
 
-LINE_PRIORITY = ["OIII", "Ha", "Hbeta", "NII", "OII"]
+import p2_common as pc  # noqa: E402  shared z_sys rule
+
+LINE_PRIORITY = pc.LINE_PRIORITY
 LAM0 = 1500.0                  # rest-frame anchor, Angstrom
 C_ANG = 2.99792458e18          # speed of light, Angstrom / s
 COSMO = FlatLambdaCDM(H0=70, Om0=0.3)   # as Paper 1
@@ -188,7 +190,8 @@ def parse_args():
     p.add_argument("--uv-max", type=float, default=3000.0,
                    help="Rest-frame pivot limit, Angstrom. Default 3000.")
     p.add_argument("--min-filters", type=int, default=2)
-    p.add_argument("--oiii-snr-min", type=float, default=13.0)
+    p.add_argument("--oiii-snr-min", type=float, default=pc.SNR_MIN["OIII"])
+    p.add_argument("--ha-snr-min", type=float, default=pc.SNR_MIN["Ha"])
     p.add_argument("--max-muv-err", type=float, default=0.5,
                    help="good_muv requires M_UV_err below this. Default 0.5.")
     p.add_argument("--max-beta-err", type=float, default=0.5,
@@ -247,17 +250,10 @@ def load_catalogues(cat_dir, aper):
     return cats
 
 
-def pick_zsys(row, oiii_snr_min):
-    for line in LINE_PRIORITY:
-        z = row.get(f"z_{line}")
-        if pd.isna(z):
-            continue
-        if line == "OIII":
-            snr = row.get("z_OIII_snr")
-            if pd.isna(snr) or float(snr) < oiii_snr_min:
-                continue
-        return float(z), f"z_sys_{line}"
-    return np.nan, None
+def pick_zsys(row, cuts):
+    """(z, z_type) from the shared rule in p2_common.pick_zsys."""
+    z, _, _, line, _ = pc.pick_zsys(row, cuts)
+    return (z, f"z_sys_{line}") if line else (np.nan, None)
 
 
 # ----------------------------------------------------------------------------
@@ -422,7 +418,7 @@ def main():
         if srow.empty:
             print(f"[{src_id}] not in sources csv, skipped")
             continue
-        z, z_type = (pick_zsys(systemic.loc[src_id], a.oiii_snr_min)
+        z, z_type = (pick_zsys(systemic.loc[src_id], {"OIII": a.oiii_snr_min, "Ha": a.ha_snr_min})
                      if src_id in systemic.index else (np.nan, None))
         if not np.isfinite(z):
             z, z_type = float(srow["z_av"].iloc[0]), "z_av"

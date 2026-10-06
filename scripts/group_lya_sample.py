@@ -209,9 +209,27 @@ def deduplicate(df, dup_map):
     return out, dropped
 
 
-def read_manual_labels(outdir, tiers):
-    """Return {ID: label} for every non-blank 'manual' entry in the existing
-    lya_group_<tier>.csv files, so a rerun keeps the labels."""
+def read_label_file(path):
+    """Return {ID: label} from lya_manual_labels.csv (update_manual_labels.py),
+    or None if the file does not exist."""
+    if not path or not os.path.exists(path):
+        return None
+    df = pd.read_csv(path, dtype={"manual": str})
+    labels = {}
+    for sid, lab in zip(df["ID"].astype(int), df["manual"]):
+        if isinstance(lab, str) and lab.strip():
+            labels[int(sid)] = lab.strip().lower()
+    return labels
+
+
+def read_manual_labels(outdir, tiers, labels_csv=None):
+    """Return {ID: label}. Read from lya_manual_labels.csv when it exists,
+    otherwise from the 'manual' column of the existing lya_group_<tier>.csv
+    files (the old behaviour), so a rerun keeps the labels."""
+    from_file = read_label_file(labels_csv)
+    if from_file is not None:
+        print(f"[INFO] manual labels read from {labels_csv}")
+        return from_file
     labels = {}
     for tier in tiers:
         path = os.path.join(outdir, f"lya_group_{tier}.csv")
@@ -484,6 +502,11 @@ def main():
     p.add_argument("--no-keep-manual", action="store_true",
                    help="Do not carry over the manual a/b/c/d labels from the "
                         "existing lya_group_<tier>.csv files in --outdir.")
+    p.add_argument("--labels-csv",
+                   default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_manual_labels.csv",
+                   help="Hand-edited label file from update_manual_labels.py. "
+                        "Used for the 'manual' column when it exists, otherwise "
+                        "the labels are carried over from the old tier CSVs.")
     args = p.parse_args()
     LSF_FRAC = args.lsf_frac
 
@@ -569,10 +592,11 @@ def main():
 
     # Carry over manual labels already written into the existing tier CSVs,
     # matched by ID, before those files are overwritten.
-    manual_map = {} if args.no_keep_manual else read_manual_labels(outdir, order)
+    manual_map = ({} if args.no_keep_manual else
+                  read_manual_labels(outdir, order, os.path.abspath(args.labels_csv)))
     if manual_map:
-        print(f"[INFO] carrying over {len(manual_map)} manual labels from the "
-              f"existing tier CSVs in {outdir}")
+        print(f"[INFO] carrying over {len(manual_map)} manual labels into the "
+              f"rewritten tier CSVs in {outdir}")
         # Deduplication keeps the pair member with the smaller delta_v_err,
         # which can switch after a rerun. Let the kept member inherit its
         # partner's label so no label is lost.
