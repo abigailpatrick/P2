@@ -4,16 +4,22 @@
 Every script that needs z_sys takes it from pick_zsys here, so the MUSE steps,
 Delta_v, M_UV / beta, the stacks and the master catalogue all use one rule.
 
-The rule, applied to a row of systemic_redshifts_by_JELS_ID.csv
----------------------------------------------------------------
-    1. [OIII] if z_OIII_snr > 13
-    2. Halpha if z_Ha_snr   > 13
+The rule, applied to a row of systemic_redshifts.csv (build_zsys_catalog.py)
+-----------------------------------------------------------------------------
+    1. [OIII] if z_OIII_snr >= 5
+    2. Halpha if z_Ha_snr   >= 5
     3. otherwise no z_sys
 
-systemic_redshifts_by_JELS_ID.csv (merge_systematic_redshifts.py) only carries
-a z_<line> value when that line's own summary CSV flagged the fit a success,
-and it already picked the highest-S/N grating where more than one succeeded.
-The S/N is LiMe's snr_line for the line that set the redshift.
+z_<line>_snr is A / noise, the fitted line amplitude over the flux scatter in
+the adjacent continuum bands (lime_fit_lines.py). 5 is the LiMe paper's
+detection boundary (Fernandez et al. 2024, Sect. 5.3). Only fits that also
+passed the width and centre-error checks reach systemic_redshifts.csv.
+
+systemic_redshifts.csv only carries a z_<line> value when a fit of that line
+was flagged a success in lime_<line>_fits.csv (lime_fit_lines.py), and it
+already picked the highest-S/N grating where more than one succeeded. The S/N
+is A / noise for the line that set the redshift. IDs are Isaac's
+PRIMER + MINERVA Numbers.
 
 Hbeta, [NII] and [OII] redshifts are still fitted and kept in that CSV, but are
 not used for z_sys.
@@ -29,7 +35,7 @@ LYA_REST = 1215.67          # AA, vacuum
 
 # Lines tried in order, each with its S/N threshold (strictly greater than).
 LINE_PRIORITY = ["OIII", "Ha"]
-SNR_MIN = {"OIII": 13.0, "Ha": 13.0}
+SNR_MIN = {"OIII": 5.0, "Ha": 5.0}
 
 GRATINGS = ["G235M", "G235H", "G395M", "G395H"]
 
@@ -37,8 +43,8 @@ GRATINGS = ["G235M", "G235H", "G395M", "G395H"]
 def pick_zsys(row, snr_min=None):
     """Return (z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating).
 
-    row is one row of systemic_redshifts_by_JELS_ID.csv (a Series or dict).
-    snr_min optionally overrides SNR_MIN, e.g. {"OIII": 13, "Ha": 10}.
+    row is one row of systemic_redshifts.csv (a Series or dict).
+    snr_min optionally overrides SNR_MIN, e.g. {"OIII": 5, "Ha": 7}.
     Everything is NaN / None when no line passes.
     """
     cuts = dict(SNR_MIN)
@@ -49,7 +55,7 @@ def pick_zsys(row, snr_min=None):
         snr = row.get(f"z_{line}_snr")
         if z is None or pd.isna(z) or snr is None or pd.isna(snr):
             continue
-        if not float(snr) > cuts[line]:
+        if not float(snr) >= cuts[line]:
             continue
         z_err = row.get(f"z_{line}_err")
         grating = row.get(f"z_{line}_grating")
@@ -66,7 +72,7 @@ def rule_text(snr_min=None):
     cuts = dict(SNR_MIN)
     if snr_min:
         cuts.update(snr_min)
-    return ", then ".join(f"{l} S/N > {cuts[l]:g}" for l in LINE_PRIORITY) + ", else none"
+    return ", then ".join(f"{l} A/noise >= {cuts[l]:g}" for l in LINE_PRIORITY) + ", else none"
 
 
 def fallback_grating(g_row, oiii_row=None):

@@ -7,19 +7,21 @@ clean two-part FITS to <input path>_lime.fits.
 
 Single or batch mode
 --------------------
+- No argument                -> converts every spectrum in every grating folder
+                                under SPECTRA_ROOT (jwst_spectra_pm/).
 - Pass a *_spectra.fits file -> converts that one.
-- Pass a directory           -> converts every *_spectra.fits inside it
+- Pass a directory           -> converts every *_spectra.fits inside it, or, if
+                                it has none, inside each of its subfolders
                                 (ignoring already-made *_spectra_lime.fits),
                                 skipping any that fail, with a summary.
 
 No fitting and no redshift here. The output holds only the spectrum, ready
-to be read into lime.Spectrum by a separate fitting script.
+to be read into lime.Spectrum by lime_fit_lines.py.
 
-E.g. 
-python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/G235H_F170LP
-python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/G235M_F170LP
-python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/G395H_F290LP
-python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/G395M_F290LP
+E.g.
+python make_lime_spectra_format.py
+python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra_pm/G395H_F290LP
+python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra_pm/G395H_F290LP/57866_G395H_F290LP_spectra.fits
 
 Output HDUs
 -----------
@@ -36,6 +38,8 @@ import numpy as np
 import astropy.units as u
 from astropy.io import fits
 
+
+SPECTRA_ROOT = "/ceph/cephfs/apatrick/P2/jwst_spectra_pm"
 
 # Units the output file will hold.
 UNITS_WAVE = "Angstrom"
@@ -108,13 +112,18 @@ def process_one(input_path):
 
 
 def run_batch(directory):
-    """Convert every *_spectra.fits in a directory, skipping the _lime outputs."""
+    """Convert every *_spectra.fits in a directory (or its subfolders)."""
     pattern = os.path.join(directory, "*_spectra.fits")
     files = sorted(
         f for f in glob.glob(pattern) if not f.endswith("_spectra_lime.fits")
     )
+    if not files:
+        files = sorted(
+            f for f in glob.glob(os.path.join(directory, "*", "*_spectra.fits"))
+            if not f.endswith("_spectra_lime.fits")
+        )
 
-    print(f"batch directory  {directory}")
+    print(f"batch directory  {os.path.abspath(directory)}")
     print(f"found {len(files)} _spectra.fits files to convert")
 
     ok, skipped = [], []
@@ -140,11 +149,11 @@ def run_batch(directory):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: python make_lime_spectra_format.py <_spectra.fits file OR directory>")
+    if len(sys.argv) > 2:
+        print("usage: python make_lime_spectra_format.py [<_spectra.fits file OR directory>]")
         sys.exit(1)
 
-    path = sys.argv[1]
+    path = sys.argv[1] if len(sys.argv) == 2 else SPECTRA_ROOT
 
     if os.path.isdir(path):
         run_batch(path)

@@ -1,43 +1,45 @@
-#!/usr/bin/env python3
-"""
-Build the per-source z_sys catalogue that the MUSE steps read
-(grating_sources_with_zsys.csv).
+#!/usr/bin/env python
+"""Build the systemic redshift catalogue of the PRIMER + MINERVA sample.
 
-z_sys now comes from systemic_redshifts_by_JELS_ID.csv with the same line
-priority used for Delta_v (p2_common.pick_zsys):
+Replaces merge_systematic_redshifts.py and the old build_zsys_catalog.py.
+Reads the per-line LiMe summaries from lime_fit_lines.py, gathers the best
+successful fit of each line per source, and applies the z_sys rule in
+p2_common.pick_zsys:
 
-    [OIII] if its S/N > 13, then Halpha if its S/N > 13, else no z_sys
+    1. [OIII] if it is detected, A/noise >= --oiii-snr-min (5)
+    2. otherwise Halpha if detected, A/noise >= --ha-snr-min (5)
+    3. otherwise no z_sys, and the source is dropped from the z_sys sample
 
-The old version took the best-S/N OIII grating only, with no threshold, so the
-MUSE continuum subtraction, extraction and Lya fit ran on a different z_sys to
-the one used for Delta_v whenever OIII was weak or missing. The output file
-name and its first columns are unchanged, so lya_local_contsub.py,
-optimize_lya_position_grating.py, ap_extract_specs_grating.py,
-sliding_snr_lya_grating.py, fit_lya_properties_grating.py,
-mc_lya_errors_grating.py, group_lya_sample.py and build_ha_flux_corrections.py
-need no edits. They read z_sys and fall back to z_dja where it is blank.
+A/noise is the fitted amplitude over the flux scatter in the adjacent
+continuum bands, and 5 is the LiMe paper's detection boundary (Fernandez et
+al. 2024, Sect. 5.3). A fit only counts if it also has FWHM >= 1 pixel and a
+centre error <= 2.5 Angstrom (lime_fit_lines.py). A line's "best" fit is the
+grating with the highest A/noise among those fits, so where a source has
+[OIII] in more than one grating, the strongest one sets z_sys. Hbeta and [OII] are kept in systemic_redshifts.csv
+for reference but are not used for z_sys.
 
-Columns
+Inputs
+------
+  jwst_catalogs/primer_minerva_in_muse.csv
+  jwst_catalogs/lime_OIII_summary.csv, lime_Ha_summary.csv,
+  lime_Hbeta_summary.csv, lime_OII_summary.csv
+
+Outputs
 -------
-  ID, grating, z_dja, z_sys, z_sys_err, z_sys_snr, z_sys_quality,
-  in_muse, edge, duplicate, AO_block, ra, dec, z_sys_line
-
-  grating        grating of the chosen line. For a source with no usable
-                 line, the grating with the highest attempted [OIII] S/N
-                 (p2_common.fallback_grating), otherwise the first grating
-                 observed. DJA redshifts from different gratings can differ
-                 by ~1000 km/s, so this choice sets the MUSE search window.
-  z_dja          DJA redshift of that grating
-  z_sys_quality  a  [OIII]
-                 b  Halpha
-                 d  no z_sys, the MUSE steps fall back to z_dja
-                 (the old 'c', low-S/N OIII, no longer exists)
-  z_sys_line     which line set z_sys
+  jwst_catalogs/systemic_redshifts.csv
+      every source in primer_minerva_in_muse.csv, with z_<line>, z_<line>_err,
+      z_<line>_snr, z_<line>_grating for OIII, Ha, Hbeta, OII, and the z_sys
+      columns below (blank where there is no z_sys)
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv
+      the rows of primer_minerva_in_muse.csv with a z_sys, plus
+      z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating, and
+      dv_sys_dja_kms, the DJA redshift of the z_sys grating relative to z_sys
 
 Usage
 -----
+python build_zsys_catalog.py --dry-run
 python build_zsys_catalog.py
-python build_zsys_catalog.py --p2-root /some/other/P2 --dry-run
+python build_zsys_catalog.py --oiii-snr-min 10 --ha-snr-min 10
 """
 
 import argparse
@@ -48,115 +50,114 @@ import pandas as pd
 
 import p2_common as pc
 
-EXTRA_COLS = ["in_muse", "edge", "duplicate", "AO_block", "ra", "dec"]
-OUTPUT_COLS = (["ID", "grating", "z_dja", "z_sys", "z_sys_err", "z_sys_snr",
-                "z_sys_quality"] + EXTRA_COLS + ["z_sys_line"])
+P2 = pc.P2_ROOT
+CAT_DIR = f"{P2}/jwst_catalogs"
+LINES = ["OIII", "Ha", "Hbeta", "OII"]
+ZSYS_COLS = ["z_sys", "z_sys_err", "z_sys_snr", "z_sys_line", "z_sys_grating", "dv_sys_dja_kms"]
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Write grating_sources_with_zsys.csv "
-                                            "from the best available systemic line.")
-    p.add_argument("--p2-root", default=pc.P2_ROOT)
-    p.add_argument("--systemic-csv", default=None,
-                   help="Default <p2-root>/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv")
-    p.add_argument("--grating-csv", default=None,
-                   help="Default <p2-root>/jwst_catalogs/grating_sources_by_JELS_ID.csv")
-    p.add_argument("--oiii-csv", default=None,
-                   help="Default <p2-root>/jwst_catalogs/OIII_results_by_JELS_ID.csv. "
-                        "Only used to pick the fallback grating for z_dja.")
-    p.add_argument("--out-csv", default=None,
-                   help="Default <p2-root>/jwst_catalogs/grating_sources_with_zsys.csv")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=f"{CAT_DIR}/primer_minerva_in_muse.csv")
+    p.add_argument("--lime-dir", default=CAT_DIR, help="folder of lime_<line>_summary.csv")
+    p.add_argument("--out-systemic", default=f"{CAT_DIR}/systemic_redshifts.csv")
+    p.add_argument("--out-zsys", default=f"{CAT_DIR}/primer_minerva_in_muse_zsys.csv")
     p.add_argument("--oiii-snr-min", type=float, default=pc.SNR_MIN["OIII"])
     p.add_argument("--ha-snr-min", type=float, default=pc.SNR_MIN["Ha"])
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print the comparison with the existing file, write nothing.")
-    a = p.parse_args()
-    cat = os.path.join(a.p2_root, "jwst_catalogs")
-    a.systemic_csv = os.path.abspath(a.systemic_csv or os.path.join(cat, "systemic_redshifts_by_JELS_ID.csv"))
-    a.grating_csv = os.path.abspath(a.grating_csv or os.path.join(cat, "grating_sources_by_JELS_ID.csv"))
-    a.oiii_csv = os.path.abspath(a.oiii_csv or os.path.join(cat, "OIII_results_by_JELS_ID.csv"))
-    a.out_csv = os.path.abspath(a.out_csv or os.path.join(cat, "grating_sources_with_zsys.csv"))
-    return a
+    p.add_argument("--dry-run", action="store_true")
+    return p.parse_args()
+
+
+def why_dropped(r, cuts):
+    """Short reason a source has no z_sys."""
+    parts = []
+    for line in ("OIII", "Ha"):
+        if pd.notna(r.get(f"z_{line}")):
+            parts.append(f"{line} A/noise {r[f'z_{line}_snr']:.1f} ({r[f'z_{line}_grating']}) "
+                         f"below {cuts[line]:g}")
+        elif r.get(f"{line}_fitted"):
+            parts.append(f"{line} fitted in {r[f'{line}_fitted']} but never successful")
+        else:
+            parts.append(f"{line} not covered or not fitted")
+    return "; ".join(parts)
 
 
 def main():
     a = parse_args()
-    print("[CONFIG]")
-    print(f"  systemic csv   {a.systemic_csv}")
-    print(f"  grating csv    {a.grating_csv}")
-    print(f"  OIII csv       {a.oiii_csv}")
-    print(f"  output csv     {a.out_csv}")
     cuts = {"OIII": a.oiii_snr_min, "Ha": a.ha_snr_min}
+    print("build_zsys_catalog.py")
+    print(f"  catalogue      {os.path.abspath(a.catalog)}")
     print(f"  z_sys rule     {pc.rule_text(cuts)}")
-    print("")
 
-    systemic = pd.read_csv(a.systemic_csv)
-    systemic["ID"] = systemic["ID"].astype(int)
-    systemic = systemic.set_index("ID")
-    grating = pd.read_csv(a.grating_csv)
-    grating["ID"] = grating["ID"].astype(int)
-    if os.path.exists(a.oiii_csv):
-        oiii = pd.read_csv(a.oiii_csv)
-        oiii["ID"] = oiii["ID"].astype(int)
-        oiii = oiii.set_index("ID")
-    else:
-        print(f"[WARN] {a.oiii_csv} missing, fallback grating is the first observed")
-        oiii = pd.DataFrame()
+    cat = pd.read_csv(a.catalog)
+    cat["ID"] = cat["ID"].astype(int)
+    sysz = cat[["ID"]].copy()
+    for line in LINES:
+        path = os.path.abspath(os.path.join(a.lime_dir, f"lime_{line}_summary.csv"))
+        if not os.path.exists(path):
+            print(f"  MISSING        {path}")
+            for s in ("", "_err", "_snr", "_grating"):
+                sysz[f"z_{line}{s}"] = np.nan
+            sysz[f"{line}_fitted"] = ""
+            continue
+        print(f"  reading        {path}")
+        s = pd.read_csv(path)
+        s["ID"] = s["ID"].astype(int)
+        s = s[["ID", f"z_{line}", f"z_{line}_err", f"z_{line}_snr", f"z_{line}_grating",
+               "gratings_fitted"]].rename(columns={"gratings_fitted": f"{line}_fitted"})
+        sysz = sysz.merge(s, on="ID", how="left")
+        sysz[f"{line}_fitted"] = sysz[f"{line}_fitted"].fillna("")
 
-    rows = []
-    for _, g_row in grating.iterrows():
-        sid = int(g_row["ID"])
-        if sid in systemic.index:
-            z, z_err, z_snr, line, gr = pc.pick_zsys(systemic.loc[sid], cuts)
-        else:
-            z, z_err, z_snr, line, gr = np.nan, np.nan, np.nan, None, None
-        if gr is None:
-            gr = pc.fallback_grating(g_row, oiii.loc[sid] if sid in oiii.index else None)
-        row = {
-            "ID": sid,
-            "grating": gr,
-            "z_dja": g_row.get(f"z_{gr}", np.nan) if gr else np.nan,
-            "z_sys": z, "z_sys_err": z_err, "z_sys_snr": z_snr,
-            "z_sys_quality": pc.zsys_quality(line),
-            "z_sys_line": line,
-        }
-        for c in EXTRA_COLS:
-            row[c] = g_row.get(c, np.nan)
-        rows.append(row)
+    picks = [pc.pick_zsys(r, cuts) for _, r in sysz.iterrows()]
+    sysz["z_sys"] = [p[0] for p in picks]
+    sysz["z_sys_err"] = [p[1] for p in picks]
+    sysz["z_sys_snr"] = [p[2] for p in picks]
+    sysz["z_sys_line"] = [p[3] for p in picks]
+    sysz["z_sys_grating"] = [p[4] for p in picks]
+    z_dja = [cat.set_index("ID").loc[i, f"z_{g}"] if isinstance(g, str) else np.nan
+             for i, g in zip(sysz["ID"], sysz["z_sys_grating"])]
+    sysz["dv_sys_dja_kms"] = pc.dz_to_kms(np.asarray(z_dja, float), sysz["z_sys"])
 
-    out = pd.DataFrame(rows, columns=OUTPUT_COLS)
+    has = sysz["z_sys"].notna()
+    zsys = cat.merge(sysz.loc[has, ["ID"] + ZSYS_COLS], on="ID", how="inner")
+    lead = ["ID", "ra", "dec"] + ZSYS_COLS
+    zsys = zsys[lead + [c for c in zsys.columns if c not in lead]]
 
-    # Compare with the file being replaced, so a change in z_sys is visible.
-    if os.path.exists(a.out_csv):
-        old = pd.read_csv(a.out_csv)
-        old["ID"] = old["ID"].astype(int)
-        m = out.merge(old[["ID", "z_sys"]], on="ID", how="left", suffixes=("", "_old"))
-        dv = pc.dz_to_kms(m["z_sys"], m["z_sys_old"])
-        gained = m["z_sys"].notna() & m["z_sys_old"].isna()
-        lost = m["z_sys"].isna() & m["z_sys_old"].notna()
-        moved = np.isfinite(dv) & (np.abs(dv) > 1.0)
-        print("[CHANGES vs existing file]")
-        print(f"  z_sys gained   {int(gained.sum())}  {m.loc[gained, 'ID'].tolist()}")
-        print(f"  z_sys lost     {int(lost.sum())}  {m.loc[lost, 'ID'].tolist()}")
-        print(f"  z_sys moved >1 km/s  {int(moved.sum())}")
-        for _, r in m[moved].iterrows():
-            i = r.name
-            print(f"     ID {int(r['ID'])}  {r['z_sys_old']:.5f} -> {r['z_sys']:.5f}  "
-                  f"({dv[i]:+.0f} km/s, now {r['z_sys_line']})")
-        print("")
+    print("\n--- Summary ---")
+    print(f"  sources in catalogue          {len(cat)}")
+    for line in LINES:
+        print(f"  successful {line:<6} fit          {int(sysz[f'z_{line}'].notna().sum())}")
+    print(f"  z_sys from [OIII]             {int((sysz['z_sys_line'] == 'OIII').sum())}")
+    print(f"  z_sys from Halpha             {int((sysz['z_sys_line'] == 'Ha').sum())}")
+    print(f"  z_sys by grating              "
+          + ", ".join(f"{g} {n}" for g, n in sysz["z_sys_grating"].value_counts().items()))
+    print(f"  with z_sys (kept)             {int(has.sum())}")
+    print(f"  without z_sys (dropped)       {int((~has).sum())}")
+    dv = sysz.loc[has, "dv_sys_dja_kms"]
+    if len(dv):
+        print(f"  DJA z - z_sys                 median {np.nanmedian(dv):+.0f} km/s, "
+              f"|dv| > 300 km/s for {int((np.abs(dv) > 300).sum())}")
 
-    q = out["z_sys_quality"].value_counts()
-    print("[SUMMARY]")
-    print(f"  sources        {len(out)}")
-    print(f"  quality a/b/d  {q.get('a', 0)} / {q.get('b', 0)} / {q.get('d', 0)}")
-    print("  z_sys_line     " + ", ".join(f"{k} {v}" for k, v in
-                                          out["z_sys_line"].value_counts().items()))
+    print("\nDropped sources")
+    for _, r in sysz[~has].iterrows():
+        print(f"  {r['ID']:<7d} {why_dropped(r, cuts)}")
+
+    if os.path.exists(a.out_zsys):
+        old = set(pd.read_csv(a.out_zsys)["ID"].astype(int))
+        new = set(zsys["ID"])
+        print(f"\nCompared with the existing {a.out_zsys}")
+        print(f"  gained {sorted(new - old)}")
+        print(f"  lost   {sorted(old - new)}")
+
     if a.dry_run:
-        print("\n[DRY RUN] nothing written")
+        print("\nDry run, nothing written.")
         return
-    os.makedirs(os.path.dirname(a.out_csv), exist_ok=True)
-    out.to_csv(a.out_csv, index=False)
-    print(f"\nwritten  {a.out_csv}")
+    sysz.to_csv(a.out_systemic, index=False)
+    zsys.to_csv(a.out_zsys, index=False)
+    print("\nWrote")
+    print(f"  {os.path.abspath(a.out_systemic)}")
+    print(f"  {os.path.abspath(a.out_zsys)}")
 
 
 if __name__ == "__main__":

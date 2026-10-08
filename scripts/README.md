@@ -9,78 +9,67 @@ cd /ceph/cephfs/apatrick/P2/scripts
 
 All data paths are under `/ceph/cephfs/apatrick/P2`. Each script prints the full paths of what it reads and writes. The end product is `master_catalog/p2_master_catalog.csv`, rebuilt from the step outputs by `build_master_catalog.py` (step 28). Rerun any step, then step 28, and the master is up to date.
 
+## Rebuild in progress (October 2026)
+
+The pipeline is being rewritten step by step to start from Isaac's PRIMER + MINERVA catalogue. Every source is now keyed on Isaac's catalogue `Number` (the `ID` column), not the JELS ID. Sections A and B below are rewritten. Section C onwards still describes the old JELS-ID version and will be updated as each step is redone.
+
 ## Systemic redshift rule
 
 One rule is used everywhere, defined once in `p2_common.py` (`pick_zsys`).
 
-1. [OIII] if its S/N > 13
-2. otherwise Hα if its S/N > 13
-3. otherwise no z_sys
+1. [OIII] if it is detected, A/noise ≥ 5
+2. otherwise Hα if detected, A/noise ≥ 5
+3. otherwise no z_sys, and the source leaves the z_sys sample
 
-The S/N is LiMe's line S/N from `systemic_redshifts_by_JELS_ID.csv`, which only holds successful fits and already takes the best grating. Hβ, [NII] and [OII] are still fitted but are not used for z_sys. The MUSE steps fall back to the DJA redshift (`z_dja`) for sources with no z_sys. `build_zsys_catalog.py`, `find_delta_v_from_best_zsys_line.py`, `fit_muv_beta.py`, `stack_lya_systematic.py` and `build_master_catalog.py` all import it. Each takes `--oiii-snr-min` and `--ha-snr-min` to change the thresholds.
+A/noise is the fitted line amplitude divided by the flux scatter in the two adjacent continuum bands, the quantity the LiMe paper (Fernández et al. 2024, Sect. 5) uses, and 5 is its detection boundary for lines about as wide as the resolution. A fit counts only if it also has a FWHM of at least 1 pixel (not a single-pixel spike) and a centre error ≤ 2.5 Å. Every fit uses LiMe's adjacent-band continuum, lines in the detector gap are not fitted ([OIII] needs 5007 itself on the spectrum), and Hα's z comes from the Hα + [NII] blend. For each line the grating with the highest A/noise among the passing fits is used. Hβ and [OII] are fitted and kept but not used for z_sys. `build_zsys_catalog.py` takes `--oiii-snr-min` and `--ha-snr-min` to change the thresholds.
 
 ## Steps in run order
 
-Each step lists the command for all sources and, where the script allows it, for one source. Replace `<ID>` with the JELS ID.
-
 ### A. NIRSpec sample and spectra
 
-**1. Download the DJA spectra** `extract_nirspec_spectra.py`
-Writes `jwst_spectra/<grating>/<ID>_<grating>_spectra.fits` and a PNG of each.
+**1. Build the sample** `build_primer_minerva_in_muse.py`
+Every Isaac object at least 1″ inside the MUSE footprint with a DJA G235M/H or G395M/H spectrum (grade ≥ 2, 2.9 < z < 6.7) within 0.3″. Spectra come from the DJA v4.4 table plus, only where v4.4 lacks them, the JELS-DJA match catalogues (the Blue Jay 2 G235H spectra). Writes `jwst_catalogs/primer_minerva_in_muse.csv`, `jwst_catalogs/primer_minerva_close_pairs.csv` and `field_images/primer_minerva_muse_footprint.png`.
 ```bash
+python build_primer_minerva_in_muse.py --dry-run
+python build_primer_minerva_in_muse.py
+```
+
+**2. Download the DJA spectra** `extract_nirspec_spectra.py`
+Writes `jwst_spectra_pm/<grating>_<filter>/<ID>_<grating>_<filter>_spectra.fits`, a PNG of each and `jwst_spectra_pm/download_log.csv`. Existing files are skipped unless `--overwrite`.
+```bash
+python extract_nirspec_spectra.py --dry-run
 python extract_nirspec_spectra.py
-```
-No single-source mode.
-
-**2. Convert to LiMe format** `make_lime_spectra_format.py`
-Writes `<ID>_<grating>_spectra_lime.fits` next to each spectrum.
-```bash
-for g in G235H_F170LP G235M_F170LP G395H_F290LP G395M_F290LP; do
-  python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/$g
-done
-# one spectrum
-python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra/G395H_F290LP/<ID>_G395H_F290LP_spectra.fits
+python extract_nirspec_spectra.py --ids <ID>
 ```
 
-**3. Merge the four grating catalogues** `merge_grating_catalogs.py`
-Writes `jwst_catalogs/grating_sources_by_JELS_ID.csv` (with in_muse, edge, duplicate, AO_block), `grating_sources_by_JELS_ID_good.csv` and `field_images/muse_footprint_check.png`.
+**3. Convert to LiMe format** `make_lime_spectra_format.py`
+Writes `<ID>_<grating>_<filter>_spectra_lime.fits` next to each spectrum. With no argument it converts every grating folder in `jwst_spectra_pm/`.
 ```bash
-python merge_grating_catalogs.py
+python make_lime_spectra_format.py
+python make_lime_spectra_format.py /ceph/cephfs/apatrick/P2/jwst_spectra_pm/G395H_F290LP/<ID>_G395H_F290LP_spectra.fits
 ```
-No single-source mode. Only rerun when the source list changes.
 
 ### B. Systemic redshifts
 
-**4. Fit [OIII]** `lime_OIII_jointfit.py`
-Writes `jwst_catalogs/OIII_results_by_JELS_ID.csv`, `OIII_summary_by_JELS_ID.csv` and fit figures under `jwst_spectra/OIII_fits/<ID>/`.
+**4. Fit [OIII], Hβ, Hα (+[NII]) and [OII]** `lime_fit_lines.py` (env312)
+Writes figures to `lime_fits/<ID>/<line>_fits/` (contsub and fit PNGs; the fit PNG is the fit that gave z, the [NII] blend for Hα), `jwst_catalogs/lime_<line>_fits.csv` (one row per source and grating) and `jwst_catalogs/lime_<line>_summary.csv` (one row per source, best fit, best Hβ/Hα flux, best Hα FWHM).
 ```bash
-python lime_OIII_jointfit.py
-# one source, by hand, patching only its rows in the two OIII CSVs
-python lime_OIII_singlereview.py <ID>
-python lime_OIII_singlereview.py <ID> --z 5.9412 --gratings G235M --dry-run
+conda activate env312
+python lime_fit_lines.py
+python lime_fit_lines.py --lines OIII Ha
+# review one source, replacing only its rows in the CSVs
+python lime_fit_lines.py --ids <ID>
+python lime_fit_lines.py --ids <ID> --lines OIII --gratings G235M --z 5.9412 --line-margin 25
+python lime_fit_lines.py --ids <ID> --lines OIII --force-single --dry-run
 ```
 
-**5. Fit Hβ, Hα, [NII], [OII]** `lime_lines_jointfit.py`
-Writes `<line>_results_by_JELS_ID.csv` and `<line>_summary_by_JELS_ID.csv` for each line, including the Hα and Hβ fluxes and the Hα FWHM.
+**5. z_sys** `build_zsys_catalog.py` (env39)
+Writes `jwst_catalogs/systemic_redshifts.csv` (every source, best z per line, z_sys where there is one) and `jwst_catalogs/primer_minerva_in_muse_zsys.csv` (only the sources with a z_sys, with `z_sys`, `z_sys_err`, `z_sys_snr`, `z_sys_line`, `z_sys_grating` and `dv_sys_dja_kms`). Prints why each dropped source has no z_sys.
 ```bash
-python lime_lines_jointfit.py
-```
-No single-source mode.
-
-**6. Merge the line redshifts** `merge_systematic_redshifts.py`
-Writes `jwst_catalogs/systemic_redshifts_by_JELS_ID.csv`, one row per source, best successful grating per line.
-```bash
-python merge_systematic_redshifts.py
-```
-Fast. Always runs on every source. Rerun after step 4, 5 or any `lime_OIII_singlereview.py` fix.
-
-**7. z_sys for the MUSE steps** `build_zsys_catalog.py`
-Writes `jwst_catalogs/grating_sources_with_zsys.csv`, which steps 9 to 14 read. It prints which sources gained, lost or changed z_sys compared with the file it replaces.
-```bash
-python build_zsys_catalog.py --dry-run   # see what would change
+python build_zsys_catalog.py --dry-run
 python build_zsys_catalog.py
 ```
-Fast. Always runs on every source.
+Rerun after any `lime_fit_lines.py --ids` review.
 
 ### C. MUSE Lyα
 
