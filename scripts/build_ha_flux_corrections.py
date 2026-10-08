@@ -1,204 +1,163 @@
 #!/usr/bin/env python
-"""Slit-loss and Balmer-decrement dust corrections for the Halpha fluxes.
+"""Slit-loss and Balmer-decrement dust corrections for the Halpha and Hbeta
+fluxes, using the PRIMER + MINERVA total photometry.
 
-Builds one row per source with the systemic redshift, the observed Halpha and
-Hbeta fluxes from the LiMe fits, slit-loss corrected fluxes for both lines,
-and the fully corrected (slit loss + dust) Halpha flux for sources with a
-usable Hbeta. Sources without Hbeta keep the slit-corrected Halpha only. The
-SED-based dust fallback for them will be added later.
+One row per source with the observed Halpha and Hbeta fluxes, the slit-loss
+factor for each line, the slit-corrected fluxes, and for sources where both
+lines are measured the Balmer decrement, E(B-V), A_Halpha and the fully
+corrected (slit loss + dust) Halpha flux.
 
-Sample
-------
-From grating_sources_with_zsys.csv: rows with in_muse true and a finite
-z_sys. Duplicates are NOT collapsed. The duplicate column is carried through
-(0 = no pair, both members of a pair share the same nonzero number) so they
-can be collapsed later.
+How it works
+------------
+1. Sample. Every source in grating_sources_with_zsys.csv with a z_sys
+   (build_zsys_catalog.py, so the same z_sys rule as everywhere else).
+   --in-muse-only keeps just the MUSE sources. Duplicate pairs are kept,
+   the master catalogue's is_primary column picks one later.
 
-Uncorrected fluxes
-------------------
-From Ha_summary_by_JELS_ID.csv and Hbeta_summary_by_JELS_ID.csv, written by
-lime_lines_jointfit.py. Halpha is the [NII]-deblended flux. Units erg/s/cm2.
-Grating choice per source:
-  1. If one or more gratings have both Halpha and Hbeta, use the one with the
-     highest S/N on the ratio, 1/sqrt(1/SN_Ha^2 + 1/SN_Hb^2). The flux
-     calibration of one spectrum then largely cancels in the decrement.
-  2. If that same-grating Hbeta is below HB_SNR_MIN but another grating has
-     Hbeta at or above it, take each line from its own best-S/N grating.
-  3. Otherwise each line comes from its own best-S/N grating.
-grating_ha, grating_hb and same_grating record what was used.
+2. Line fluxes. From Ha_summary_by_JELS_ID.csv and Hbeta_summary_by_JELS_ID.csv
+   (lime_lines_jointfit.py), per grating, in erg/s/cm2. Halpha is the
+   [NII]-deblended flux. Which grating each line is taken from:
+     a. if one or more gratings have both lines, the one with the highest
+        S/N on the ratio, 1/sqrt(1/SN_Ha^2 + 1/SN_Hb^2), so the flux
+        calibration of a single spectrum cancels in the decrement;
+     b. unless that grating's Hbeta is below --line-snr-min while another
+        grating's Hbeta is above it, in which case
+     c. each line comes from its own highest-S/N grating.
+   grating_ha, grating_hb and same_grating record the choice.
 
-Slit-loss correction
---------------------
-Two modes, chosen with --slit-mode.
-  dja: no extra correction. The msaexp path-loss
-      correction already in the DJA spectra is taken as sufficient, so the
-      slit factor is 1 with zero error and slit_source = "dja". Agreed with
-      supervisor while the meaning of the _corr photometry is confirmed.
-  phot (default): an extra correction from photometry, described below.
-For each line in phot mode, in the spectrum that line's flux came from:
-  1. Candidate filters are the NIRCam filters with photometry for the source
-     whose transmission at the observed line wavelength is at least half the
-     filter peak (the half-power definition JDox uses for lambda-/lambda+).
-  2. The line itself must fall on the spectrum, and at least MIN_COVERAGE of
-     the filter (weighted by T c/lambda, as in the synthetic flux, above
-     COVER_T_FLOOR of peak) must lie on the spectrum. Gaps up to GAP_TOL_PIX
-     median pixels (masked pixels) are interpolated over. Filter wings often
-     run past the grating edge or into the H-grating detector gap, so full
-     coverage is rare.
-  3. Synthetic photometry, photon-counting convention:
-        <f_nu> = int f_lambda T lambda dlambda / int T (c/lambda) dlambda
-     computed on the spectrum's own pixels where covered, with errors from
-     the pixel errors assumed independent. Any uncovered wing is filled with
-     the median f_nu of the spectrum pixels inside the filter, which a
-     narrow emission line barely moves. On synthetic tests with a strong line
-     this recovers the full-filter flux to ~1% at 75% coverage.
-  4. factor = f_nu,phot / f_nu,synth. Both must have S/N >= SLIT_SNR_MIN.
-  5. Among passing filters a narrow band is preferred, then a medium band,
-     then a wide band, then the highest factor S/N.
-  6. If no filter passes, the factor is the median of the direct factors for
-     that line across the sample, with the NMAD scatter of those factors as
-     its error (needs at least MIN_FOR_MEDIAN direct factors).
-  flux_slitcorr = flux_uncorr x factor, errors combined in quadrature.
+3. Slit-loss factor, per line, in the spectrum the line came from.
+   The NIRSpec spectrum is compared with the PRIMER+MINERVA photometry
+   (match_primer_minerva.py output, matched to JELS by position) in a filter
+   that contains the line:
+     a. candidate filters have transmission at the observed line wavelength
+        of at least half their peak (the half-power definition),
+     b. the line must fall on the spectrum, and at least --min-coverage of
+        the filter (photon weighted, T c/lambda) must lie on it. Small
+        gaps are interpolated over, any uncovered wing is filled with the
+        median f_nu of the spectrum inside the filter,
+     c. synthetic f_nu = int f_lambda T lambda dlambda / int T c/lambda dlambda,
+     d. factor = f_nu(photometry) / f_nu(synthetic), both at S/N >= 3,
+     e. among passing filters a medium band is preferred (MINERVA), then a
+        wide band, then the highest factor S/N.
+   The photometry is TOTAL by default (aperture flux x total_correction, as
+   Ken advised), so the corrected line fluxes are total fluxes.
+   --phot aperture uses the 0.3/0.5 arcsec aperture fluxes instead.
+   Sources whose photometry Flag contains 1, 2 or 3 (flags combine as
+   digits, e.g. 561 = Flags 5, 6 and 1), and sources marked pm_blend
+   by match_primer_minerva.py (a comparably bright neighbour within
+   0.3 arcsec, --allow-blends to keep them) (near stars or bright
+   neighbours, or a capped total correction) get no direct factor.
+   Where no filter passes, the factor is the median of the direct factors
+   for that line across the sample, with the NMAD scatter as its error
+   (needs at least --min-for-median direct factors). ha_slit_source says
+   which: direct or sample_median.
+   --slit-mode dja skips all of this and uses factor 1 (trust the msaexp
+   path-loss correction in the DJA spectra).
 
-Balmer decrement dust correction (Monte Carlo)
-----------------------------------------------
-Only for sources with Halpha and Hbeta flux S/N >= HB_SNR_MIN (both lines).
-Ratio basis (balmer_basis column, --balmer-basis):
-  observed_same_grating  both lines from one spectrum. The observed ratio is
-      used and the slit factors cancel. The per-filter slit factors carry
-      photometric noise and systematics (e.g. duplicate IDs of one galaxy
-      gave Hbeta factors of 0.32 and 0.92 from the same spectrum), which
-      scrambled the ratio when applied to each line separately. The msaexp
-      path-loss correction handles the wavelength dependence of the point-
-      source loss between the two lines.
-  slitcorr  lines from different gratings, so each is slit-corrected first.
-Each draw samples the observed fluxes and the slit factors from Gaussians,
-then
-  R        = Halpha / Hbeta (observed or slit-corrected, as above)
-  E(B-V)   = 2.5 / (k(Hb) - k(Ha)) log10(R / R_INT), set to 0 when R < R_INT
-  A_Ha     = k(Ha) E(B-V)
-  F_full   = F_Ha,obs x slit_factor_Ha x 10^(0.4 A_Ha)
-Draws with a non-positive flux, factor or ratio are discarded (the fraction
-is printed). The whole decrement is also always run with slit factor 1 for both lines,
-giving the *_dja columns (trust the msaexp path-loss correction as it is),
-so the photometric slit-loss correction can be compared directly.
-Reported values are the 50th percentile, with err_lo and err_hi
-being the 50-16 and 84-50 percentile differences.
-k(lambda) is computed from the Calzetti et al. (2000) formula, R_V = 4.05,
-the same curve Paper 1 used. R_INT = 2.86, Case B at T = 1e4 K,
-n_e = 100 cm^-3 (Osterbrock & Ferland 2006).
+4. Balmer decrement, Monte Carlo (--n-mc draws). Only where Halpha and
+   Hbeta both have S/N >= --line-snr-min.
+     ratio basis   observed_same_grating: both lines from one spectrum,
+                   observed ratio, slit factors cancel.
+                   slitcorr: different gratings, each line slit-corrected
+                   first. --balmer-basis slitcorr forces this always.
+     E(B-V)        2.5 / (k(Hb) - k(Ha)) log10(R / 2.86), 0 if R < 2.86
+                   (Case B, 1e4 K, n_e = 100 cm^-3, Osterbrock & Ferland 2006)
+     A_Ha          k(Ha) E(B-V), Calzetti et al. (2000), R_V = 4.05
+     F_full        F_Ha,obs x slit_factor_Ha x 10^(0.4 A_Ha)
+   Values are the 50th percentile, errors 50-16 and 84-50. The same
+   decrement with slit factor 1 gives the *_dja columns for comparison.
+   Sources without a usable Hbeta have no dust correction yet. The
+   SED-based fallback (A_V from Ken's fits scaled to Halpha) comes once the
+   SED block exists. dust_method says which applied.
 
-Photometry (the flux the spectrum is corrected to)
---------------------------------------------------
-The slit factor corrects the spectrum to whatever the comparison photometry
-measures, so that choice decides how close to total the result is. All of it
-is set on the command line (--phot-cats, --phot-base, the suffix options and
---flux-unit-jy), so a total-flux catalogue can be swapped in later with no
-code changes. The column stem used is written to slit_reference.
-Default: NIRCam_<FILT>_APER_600_mas_flux_corr and _fluxerr_corr from the four
-JELS_F356W_DJA_*_match_0p3as.fits catalogues (Corey's photometry), as in
-fit_muv_beta.py. Per Ken (Oct 2026), _corr is most likely a Milky Way
-extinction correction, NOT an aperture-to-total correction. These fluxes
-therefore correct the spectrum to 0.6 arcsec aperture flux, not total. A
-larger aperture from the same catalogue gets closer to total as a stand-in
-until total-corrected fluxes are available. The flux unit is inferred from
-the magnitude-column zero point unless --flux-unit-jy is given. The first
-catalogue containing the ID is used.
-
-Filter curves
--------------
-SVO Filter Profile Service (Rodrigo, Solano & Bayo 2012; Rodrigo & Solano
-2020), ASCII format, wavelength in Angstrom and transmission, e.g.
-  http://svo2.cab.inta-csic.es/theory/fps/getdata.php?format=ascii&id=JWST/NIRCam.F444W
-Download once with --download-filters, which writes
-<FILTER_DIR>/JWST_NIRCam.<FILT>.dat and then exits.
+Outputs
+-------
+  ha_hb_flux_corrections.csv   full table (read by build_master_catalog.py)
+  ha_hb_flux_corrections_values.csv   just the main values
+Column names are unchanged from the previous version, so the master
+catalogue needs no edits. New columns: z_sys_line, phot_mode, pm_sep_arcsec,
+pm_flag, pm_total_correction, and per line <ha|hb>_slit_phot_ujy and
+<ha|hb>_slit_synth_ujy (the two fluxes the factor is the ratio of).
 
 Usage
 -----
 python build_ha_flux_corrections.py --download-filters   # once
-python build_ha_flux_corrections.py                       # 0.6 arcsec _corr photometry
-python build_ha_flux_corrections.py --phot-base 'NIRCam_{filt}_APER_2_as' \
-    --out /ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections_2as.csv  # 2 arcsec
-python build_ha_flux_corrections.py --slit-mode dja       # DJA path loss only
+python build_ha_flux_corrections.py                      # total photometry
+python build_ha_flux_corrections.py --phot aperture --out .../ha_hb_flux_corrections_aper.csv
+python build_ha_flux_corrections.py --slit-mode dja      # no photometric slit correction
 """
 
+import argparse
 import os
 import sys
-import argparse
 import urllib.request
 
 import numpy as np
 import pandas as pd
-from astropy.table import Table
 from astropy.io import fits
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import p2_common as pc  # noqa: E402
 
-# ----------------------------------------------------------------------------
-# Paths
-# ----------------------------------------------------------------------------
-P2 = "/ceph/cephfs/apatrick/P2"
-CAT_DIR = f"{P2}/jwst_catalogs"
-SPEC_ROOT = f"{P2}/jwst_spectra"
-ZSYS_CSV = f"{CAT_DIR}/grating_sources_with_zsys.csv"
-HA_SUMMARY = f"{CAT_DIR}/Ha_summary_by_JELS_ID.csv"
-HB_SUMMARY = f"{CAT_DIR}/Hbeta_summary_by_JELS_ID.csv"
+CAT_DIR = f"{pc.P2_ROOT}/jwst_catalogs"
+SPEC_ROOT = f"{pc.P2_ROOT}/jwst_spectra"
 FILTER_DIR = f"{CAT_DIR}/nircam_filters"
-OUT_CSV = f"{CAT_DIR}/ha_hb_flux_corrections.csv"
-
-PHOT_CATALOGUES = [
-    f"{CAT_DIR}/JELS_F356W_DJA_G235H_F170LP_match_0p3as.fits",
-    f"{CAT_DIR}/JELS_F356W_DJA_G235M_F170LP_match_0p3as.fits",
-    f"{CAT_DIR}/JELS_F356W_DJA_G395H_F290LP_match_0p3as.fits",
-    f"{CAT_DIR}/JELS_F356W_DJA_G395M_F290LP_match_0p3as.fits",
-]
-# Comparison photometry. Set from the command line in main(), so a different
-# catalogue (e.g. total fluxes) can be swapped in without editing the code.
-PHOT = {
-    "cats": PHOT_CATALOGUES,
-    "id_col": "ID",
-    "base": "NIRCam_{filt}_APER_600_mas",
-    "flux": "_flux_corr",
-    "err": "_fluxerr_corr",
-    "mag": "_mag_corr",
-    "unit_jy": None,       # None = infer from the matching magnitude column
-}
 
 GRATINGS_FULL = {"G235M": "G235M_F170LP", "G235H": "G235H_F170LP",
                  "G395M": "G395M_F290LP", "G395H": "G395H_F290LP"}
 
-# NIRCam filters in the photometric catalogues that the G235/G395 gratings
-# can cover. The bluer NIRCam filters lie below the G235 range.
-SLIT_FILTERS = ["F200W", "F277W", "F356W", "F410M", "F444W", "F466N", "F470N"]
+# Bands in the PRIMER+MINERVA catalogue that G235 / G395 can cover
+# (G235 starts at 1.66 um, so nothing bluer than F182M is useful).
+SLIT_FILTERS = ["F182M", "F200W", "F210M", "F250M", "F277W", "F300M",
+                "F356W", "F360M", "F410M", "F444W", "F460M"]
 SVO_URL = "http://svo2.cab.inta-csic.es/theory/fps/getdata.php?format=ascii&id=JWST/NIRCam.{filt}"
 
-# ----------------------------------------------------------------------------
-# Physics
-# ----------------------------------------------------------------------------
 C_ANG = 2.99792458e18          # speed of light, Angstrom / s
 HA_REST = 6564.632             # vacuum, Angstrom, as lime_lines_jointfit.py
 HB_REST = 4862.683
-R_INT = 2.86                   # Case B Ha/Hb, T = 1e4 K, n_e = 100 cm^-3
-RV_CALZETTI = 4.05             # Calzetti et al. (2000)
-
-# ----------------------------------------------------------------------------
-# Choices (all adjustable)
-# ----------------------------------------------------------------------------
-HB_SNR_MIN = 3.0          # flux S/N cut on Hbeta (and Halpha) for the decrement
-SLIT_SNR_MIN = 3.0        # S/N cut on synthetic and photometric fluxes
-MIN_COVERAGE = 0.70       # min fraction of the filter (photon weighted) on the spectrum
-COVER_T_FLOOR = 0.01      # filter curve below this fraction of peak is ignored
-GAP_TOL_PIX = 5           # gaps up to this many median pixels are interpolated over
-BALMER_BASIS = "auto"     # auto: same grating -> observed ratio, else slit-corrected
-MIN_FOR_MEDIAN = 3        # min direct factors needed for the sample-median fallback
-N_MC = 10000
-MC_SEED = 42
-
-ZP_TO_JY = {23.9: 1e-6, 31.4: 1e-9, 8.9: 1.0, 16.4: 1e-3}
+R_INT = 2.86                   # Case B Ha/Hb
+RV_CALZETTI = 4.05
+COVER_T_FLOOR = 0.01           # filter curve below this fraction of peak ignored
+GAP_TOL_PIX = 5                # spectrum gaps up to this many pixels interpolated
 
 
-# ----------------------------------------------------------------------------
-# Filter curves
-# ----------------------------------------------------------------------------
+# ============================================================================
+# Arguments
+# ============================================================================
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--download-filters", action="store_true",
+                   help="Download any missing NIRCam filter curves from SVO, then exit.")
+    p.add_argument("--zsys-csv", default=f"{CAT_DIR}/grating_sources_with_zsys.csv")
+    p.add_argument("--ha-summary", default=f"{CAT_DIR}/Ha_summary_by_JELS_ID.csv")
+    p.add_argument("--hb-summary", default=f"{CAT_DIR}/Hbeta_summary_by_JELS_ID.csv")
+    p.add_argument("--phot-csv", default=f"{CAT_DIR}/primer_minerva_by_JELS_ID.csv",
+                   help="match_primer_minerva.py output.")
+    p.add_argument("--phot", choices=["total", "aperture"], default="total")
+    p.add_argument("--slit-mode", choices=["phot", "dja"], default="phot")
+    p.add_argument("--allow-flagged-phot", action="store_true",
+                   help="Also use photometry with Flag 1, 2 or 3.")
+    p.add_argument("--allow-blends", action="store_true",
+                   help="Also use photometry of sources with pm_blend True.")
+    p.add_argument("--in-muse-only", action="store_true")
+    p.add_argument("--line-snr-min", type=float, default=3.0,
+                   help="S/N needed on both lines for the Balmer decrement.")
+    p.add_argument("--slit-snr-min", type=float, default=3.0)
+    p.add_argument("--min-coverage", type=float, default=0.70)
+    p.add_argument("--min-for-median", type=int, default=3)
+    p.add_argument("--balmer-basis", choices=["auto", "slitcorr"], default="auto")
+    p.add_argument("--n-mc", type=int, default=10000)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--out", default=f"{CAT_DIR}/ha_hb_flux_corrections.csv")
+    return p.parse_args()
+
+
+# ============================================================================
+# Filters
+# ============================================================================
+
 def filter_path(filt):
     return os.path.join(FILTER_DIR, f"JWST_NIRCam.{filt}.dat")
 
@@ -206,9 +165,11 @@ def filter_path(filt):
 def download_filters():
     os.makedirs(FILTER_DIR, exist_ok=True)
     for filt in SLIT_FILTERS:
-        url = SVO_URL.format(filt=filt)
         out = filter_path(filt)
-        print(f"  {url}")
+        if os.path.exists(out):
+            print(f"  have  {os.path.abspath(out)}")
+            continue
+        url = SVO_URL.format(filt=filt)
         with urllib.request.urlopen(url, timeout=60) as r:
             text = r.read().decode()
         rows = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
@@ -217,31 +178,33 @@ def download_filters():
         with open(out, "w") as fh:
             fh.write(f"# SVO FPS JWST/NIRCam.{filt}\n# {url}\n# wavelength_AA transmission\n")
             fh.write("\n".join(rows) + "\n")
-        print(f"    -> {os.path.abspath(out)}  ({len(rows)} rows)")
+        print(f"  wrote {os.path.abspath(out)}  ({len(rows)} rows)")
 
 
 def load_filters():
     curves = {}
+    missing = [f for f in SLIT_FILTERS if not os.path.exists(filter_path(f))]
+    if missing:
+        raise FileNotFoundError(f"Filter curves missing for {missing} in {FILTER_DIR}. "
+                                "Run with --download-filters first.")
     for filt in SLIT_FILTERS:
-        p = filter_path(filt)
-        if not os.path.exists(p):
-            raise FileNotFoundError(f"{p} missing. Run with --download-filters first.")
-        d = np.loadtxt(p)
-        order = np.argsort(d[:, 0])
-        curves[filt] = (d[order, 0], d[order, 1])
+        d = np.loadtxt(filter_path(filt))
+        o = np.argsort(d[:, 0])
+        curves[filt] = (d[o, 0], d[o, 1])
     return curves
 
 
-def filter_class_rank(filt):
-    """Narrow (N) before medium (M) before wide (W)."""
+def filter_rank(filt):
+    """Medium before wide."""
     return {"N": 0, "M": 1, "W": 2}[filt[-1]]
 
 
-# ----------------------------------------------------------------------------
+# ============================================================================
 # Attenuation
-# ----------------------------------------------------------------------------
+# ============================================================================
+
 def k_calzetti(lam_aa):
-    """Calzetti et al. (2000) k(lambda), lambda in Angstrom, valid 0.12-2.2 um."""
+    """Calzetti et al. (2000) k(lambda), lambda in Angstrom, 0.12-2.2 um."""
     x = lam_aa / 1e4
     if 0.63 <= x <= 2.20:
         return 2.659 * (-1.857 + 1.040 / x) + RV_CALZETTI
@@ -254,26 +217,26 @@ K_HA = k_calzetti(HA_REST)
 K_HB = k_calzetti(HB_REST)
 
 
-# ----------------------------------------------------------------------------
-# Inputs
-# ----------------------------------------------------------------------------
-def truthy(series):
-    return series.astype(str).str.strip().str.lower().isin(["true", "1", "1.0", "yes"])
+# ============================================================================
+# Step 1-2: sample and line fluxes
+# ============================================================================
+
+def truthy(s):
+    return s.astype(str).str.strip().str.lower().isin(["true", "1", "1.0", "yes"])
 
 
-def load_sample():
-    df = pd.read_csv(ZSYS_CSV)
+def load_sample(path, in_muse_only):
+    df = pd.read_csv(path)
+    df["ID"] = df["ID"].astype(int)
     n0 = len(df)
-    df = df[truthy(df["in_muse"])]
-    n1 = len(df)
     df = df[np.isfinite(pd.to_numeric(df["z_sys"], errors="coerce"))]
-    print(f"  {n0} rows, {n1} in_muse, {len(df)} with z_sys")
-    n_dup = int((pd.to_numeric(df["duplicate"], errors="coerce").fillna(0) > 0).sum())
-    print(f"  of which {n_dup} are members of duplicate pairs (kept, not collapsed)")
-    keep = ["ID", "grating", "z_dja", "z_sys", "z_sys_err", "duplicate"]
-    out = df[keep].copy()
-    out["ID"] = out["ID"].astype(int)
-    return out.reset_index(drop=True)
+    if in_muse_only:
+        df = df[truthy(df["in_muse"])]
+    print(f"  sample: {len(df)} of {n0} sources with a z_sys"
+          f"{' and in MUSE' if in_muse_only else ''}")
+    keep = [c for c in ("ID", "z_sys", "z_sys_err", "z_sys_line", "in_muse", "duplicate")
+            if c in df.columns]
+    return df[keep].reset_index(drop=True)
 
 
 def load_summary(path):
@@ -282,12 +245,11 @@ def load_summary(path):
     return s.set_index("ID")
 
 
-def line_fluxes(summ, src_id, name):
+def line_fluxes(summ, sid, name):
     """{grating: (flux, err, snr)} for gratings with a finite flux."""
-    out = {}
-    if src_id not in summ.index:
-        return out
-    row = summ.loc[src_id]
+    if sid not in summ.index:
+        return {}
+    row, out = summ.loc[sid], {}
     for gr in GRATINGS_FULL:
         f = row.get(f"{name}_{gr}_flux", np.nan)
         e = row.get(f"{name}_{gr}_flux_err", np.nan)
@@ -296,104 +258,60 @@ def line_fluxes(summ, src_id, name):
     return out
 
 
-def choose_gratings(ha, hb):
-    """Return (grating_ha, grating_hb). Either may be None."""
-    best = lambda d: max(d, key=lambda g: d[g][2]) if d else None
-    g_ha_best, g_hb_best = best(ha), best(hb)
+def choose_gratings(ha, hb, snr_min):
+    """(grating_ha, grating_hb), either may be None. See step 2 in the docstring."""
+    def best(d):
+        return max(d, key=lambda g: d[g][2]) if d else None
+    g_ha, g_hb = best(ha), best(hb)
     common = [g for g in ha if g in hb]
     if common:
-        ratio_snr = {g: 1.0 / np.sqrt(1.0 / ha[g][2] ** 2 + 1.0 / hb[g][2] ** 2)
-                     if ha[g][2] > 0 and hb[g][2] > 0 else -np.inf for g in common}
-        g = max(ratio_snr, key=ratio_snr.get)
-        if hb[g][2] >= HB_SNR_MIN or hb[g_hb_best][2] < HB_SNR_MIN:
+        rsnr = {g: 1.0 / np.sqrt(1.0 / ha[g][2] ** 2 + 1.0 / hb[g][2] ** 2)
+                if ha[g][2] > 0 and hb[g][2] > 0 else -np.inf for g in common}
+        g = max(rsnr, key=rsnr.get)
+        if hb[g][2] >= snr_min or hb[g_hb][2] < snr_min:
             return g, g
-    return g_ha_best, g_hb_best
+    return g_ha, g_hb
 
 
-def flux_unit_to_jy(tab, fcol, mcol):
-    f = np.asarray(tab[fcol], dtype=float)
-    m = np.asarray(tab[mcol], dtype=float)
-    ok = np.isfinite(f) & np.isfinite(m) & (f > 0) & (m > 0) & (m < 50)
-    if ok.sum() == 0:
-        return None
-    zp = np.median(m[ok] + 2.5 * np.log10(f[ok]))
-    for ref, scale in ZP_TO_JY.items():
-        if abs(zp - ref) < 0.3:
-            return scale
-    raise ValueError(f"Could not identify flux unit of {fcol}: zero point {zp:.3f}")
+# ============================================================================
+# Step 3: slit loss
+# ============================================================================
 
-
-def phot_cols(filt):
-    base = PHOT["base"].format(filt=filt)
-    return base + PHOT["flux"], base + PHOT["err"], base + PHOT["mag"]
-
-
-def load_photometry():
-    cats = []
-    for path in PHOT["cats"]:
-        tab = Table.read(path).to_pandas()
-        tab[PHOT["id_col"]] = tab[PHOT["id_col"]].astype(int)
-        tab = tab.drop_duplicates(subset=PHOT["id_col"]).set_index(PHOT["id_col"])
-        scales = {}
+def load_photometry(path, mode):
+    """{ID: {"bands": {FILT: (f_nu Jy, err Jy)}, "flag": int, "sep": .., "tc": ..}}"""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} missing. Run match_primer_minerva.py first.")
+    t = pd.read_csv(path)
+    t["ID"] = t["ID"].astype(int)
+    suf = "_tot" if mode == "total" else "_ap"
+    out = {}
+    for _, r in t.iterrows():
+        bands = {}
         for filt in SLIT_FILTERS:
-            fcol, ecol, mcol = phot_cols(filt)
-            if fcol not in tab.columns or ecol not in tab.columns:
-                continue
-            if PHOT["unit_jy"] is not None:
-                scales[filt] = PHOT["unit_jy"]
-            elif mcol in tab.columns:
-                scales[filt] = flux_unit_to_jy(tab, fcol, mcol)
-            else:
-                scales[filt] = None
-        print(f"  read {os.path.abspath(path)}  ({len(tab)} IDs, "
-              f"filters {', '.join(f for f, s in scales.items() if s) or 'NONE'})")
-        cats.append((tab, scales))
-    for _, scales in cats:   # fill units not inferable in one catalogue
-        for filt, s in scales.items():
-            if s is None:
-                others = [c[1].get(filt) for c in cats if c[1].get(filt)]
-                scales[filt] = others[0] if others else None
-    if not any(s for _, sc in cats for s in sc.values()):
-        raise ValueError(f"No photometry columns matching {phot_cols('<FILT>')} found. "
-                         "Check --phot-base and the suffix options.")
-    return cats
-
-
-def source_photometry(cats, src_id):
-    """{filt: (f_nu Jy, err Jy)} from the first catalogue holding the ID."""
-    for tab, scales in cats:
-        if src_id not in tab.index:
-            continue
-        row = tab.loc[src_id]
-        out = {}
-        for filt, s in scales.items():
-            if not s:
-                continue
-            fcol, ecol, _ = phot_cols(filt)
-            f, e = float(row[fcol]), float(row[ecol])
+            f, e = r.get(filt.lower() + suf, np.nan), r.get(filt.lower() + suf + "_err", np.nan)
             if np.isfinite(f) and np.isfinite(e) and e > 0:
-                out[filt] = (f * s, e * s)
-        return out
-    return {}
+                bands[filt] = (f * 1e-6, e * 1e-6)          # uJy -> Jy
+        out[int(r["ID"])] = dict(bands=bands, flag=r.get("pm_flag", np.nan),
+                                 blend=str(r.get("pm_blend", "")).lower() in ("true", "1", "1.0"),
+                                 sep=r.get("pm_sep_arcsec", np.nan),
+                                 tc=r.get("pm_total_correction", np.nan))
+    return out
 
 
-def spectrum_path(src_id, gr):
+def spectrum_path(sid, gr):
     full = GRATINGS_FULL[gr]
-    return os.path.join(SPEC_ROOT, full, f"{src_id}_{full}_spectra_lime.fits")
+    return os.path.join(SPEC_ROOT, full, f"{sid}_{full}_spectra_lime.fits")
 
 
-def load_spectrum(src_id, gr):
-    with fits.open(spectrum_path(src_id, gr)) as h:
+def load_spectrum(sid, gr):
+    with fits.open(spectrum_path(sid, gr)) as h:
         t = h["SPECTRUM"].data
         w, f, e = (np.asarray(t[c], dtype=float) for c in ("WAVE", "FLUX", "ERR"))
     ok = np.isfinite(w) & np.isfinite(f) & np.isfinite(e) & (e > 0)
-    order = np.argsort(w[ok])
-    return w[ok][order], f[ok][order], e[ok][order]
+    o = np.argsort(w[ok])
+    return w[ok][o], f[ok][o], e[ok][o]
 
 
-# ----------------------------------------------------------------------------
-# Slit loss
-# ----------------------------------------------------------------------------
 def _trapz(y, x):
     return (getattr(np, "trapezoid", None) or np.trapz)(y, x)
 
@@ -409,7 +327,7 @@ def covered_mask(w, x):
 
 
 def coverage(w, lam_f, t_f):
-    """Fraction of the filter's photon-counting weight, T c/lambda, on the spectrum."""
+    """Fraction of the filter's photon-counting weight on the spectrum."""
     keep = t_f >= COVER_T_FLOOR * t_f.max()
     lf, tf = lam_f[keep], t_f[keep]
     wt = tf * C_ANG / lf
@@ -418,12 +336,7 @@ def coverage(w, lam_f, t_f):
 
 def synthetic_fnu(w, f, e, lam_f, t_f):
     """Photon-counting synthetic f_nu (Jy) and error from an f_lambda spectrum.
-
-    The part of the filter the spectrum covers is integrated directly. Any
-    uncovered filter wing is filled with the median f_nu of the spectrum
-    pixels inside the filter (a continuum level that a narrow emission line
-    barely moves), weighted by the uncovered fraction of the filter.
-    """
+    Uncovered filter wings are filled with the median f_nu inside the filter."""
     t = np.interp(w, lam_f, t_f, left=0.0, right=0.0)
     on = t >= COVER_T_FLOOR * t_f.max()
     dl = np.gradient(w)
@@ -432,10 +345,8 @@ def synthetic_fnu(w, f, e, lam_f, t_f):
     err_cov = np.sqrt(np.sum((e * t * w * dl) ** 2)) / den
     cov = coverage(w, lam_f, t_f)
     if cov < 1.0:
-        fnu_pix = f[on] * w[on] ** 2 / C_ANG
-        enu_pix = e[on] * w[on] ** 2 / C_ANG
-        fill = np.median(fnu_pix)
-        fill_err = 1.253 * np.median(enu_pix) / np.sqrt(on.sum())
+        fill = np.median(f[on] * w[on] ** 2 / C_ANG)
+        fill_err = 1.253 * np.median(e[on] * w[on] ** 2 / C_ANG) / np.sqrt(on.sum())
     else:
         fill, fill_err = 0.0, 0.0
     fnu = cov * fnu_cov + (1 - cov) * fill
@@ -443,15 +354,15 @@ def synthetic_fnu(w, f, e, lam_f, t_f):
     return fnu / 1e-23, err / 1e-23
 
 
-def direct_slit_factor(src_id, gr, lam_line, phot, curves):
-    """Best direct factor for one line. Returns dict, or None if no filter passes."""
+def direct_slit_factor(sid, gr, lam_line, bands, curves, a):
+    """Best direct factor for one line. Returns (dict or None, reason)."""
     try:
-        w, f, e = load_spectrum(src_id, gr)
+        w, f, e = load_spectrum(sid, gr)
     except (FileNotFoundError, OSError, KeyError):
         return None, "no spectrum"
     cands, reasons = [], []
     for filt in SLIT_FILTERS:
-        if filt not in phot:
+        if filt not in bands:
             continue
         lam_f, t_f = curves[filt]
         if np.interp(lam_line, lam_f, t_f, left=0, right=0) < 0.5 * t_f.max():
@@ -460,44 +371,97 @@ def direct_slit_factor(src_id, gr, lam_line, phot, curves):
             reasons.append(f"{filt} line in spectrum gap")
             continue
         cov = coverage(w, lam_f, t_f)
-        if cov < MIN_COVERAGE:
+        if cov < a.min_coverage:
             reasons.append(f"{filt} cov {cov:.2f}")
             continue
         fs, es = synthetic_fnu(w, f, e, lam_f, t_f)
-        fp, ep = phot[filt]
-        if not (fs / es >= SLIT_SNR_MIN and fp / ep >= SLIT_SNR_MIN):
+        fp, ep = bands[filt]
+        if not (fs / es >= a.slit_snr_min and fp / ep >= a.slit_snr_min):
             reasons.append(f"{filt} S/N synth {fs/es:.1f} phot {fp/ep:.1f}")
             continue
         fac = fp / fs
         fac_e = fac * np.sqrt((ep / fp) ** 2 + (es / fs) ** 2)
-        cands.append(dict(filt=filt, factor=fac, factor_err=fac_e,
-                          snr=fac / fac_e, synth=fs, phot=fp, cov=cov))
+        cands.append(dict(filt=filt, factor=fac, factor_err=fac_e, snr=fac / fac_e,
+                          synth=fs, phot=fp, cov=cov))
     if not cands:
         return None, "; ".join(reasons) if reasons else "no filter contains line"
-    best = min(cands, key=lambda c: (filter_class_rank(c["filt"]), -c["snr"]))
-    return best, ""
+    return min(cands, key=lambda c: (filter_rank(c["filt"]), -c["snr"])), ""
 
 
-# ----------------------------------------------------------------------------
-# Balmer MC
-# ----------------------------------------------------------------------------
-def balmer_mc(fha, eha, fhb, ehb, sha, esha, shb, eshb, use_slit_in_ratio, rng):
-    """Monte Carlo Balmer decrement.
+def slit_factors(out, phot, curves, a):
+    """Fill the <ha|hb>_slit_* columns in place."""
+    for pre in ("ha", "hb"):
+        for c in ("slit_filter", "slit_source", "slit_note"):
+            out[f"{pre}_{c}"] = None
+        for c in ("slit_factor", "slit_factor_err", "slit_coverage",
+                  "slit_phot_ujy", "slit_synth_ujy"):
+            out[f"{pre}_{c}"] = np.nan
 
-    The fully corrected Halpha is always slit-loss corrected. The ratio uses
-    slit-corrected fluxes only when use_slit_in_ratio is True (lines from
-    different gratings). Otherwise the observed ratio from one spectrum is
-    used and the slit factors cancel.
-    """
-    ha_obs = rng.normal(fha, eha, N_MC)
-    hb_obs = rng.normal(fhb, ehb, N_MC)
-    s_ha = rng.normal(sha, esha, N_MC)
-    if use_slit_in_ratio:
-        ratio = (ha_obs * s_ha) / (hb_obs * rng.normal(shb, eshb, N_MC))
-    else:
-        ratio = ha_obs / hb_obs
-    good = (ha_obs > 0) & (hb_obs > 0) & (s_ha > 0) & (ratio > 0)
-    ratio, ha_corr = ratio[good], (ha_obs * s_ha)[good]
+    for i, r in out.iterrows():
+        sid, z = int(r["ID"]), float(r["z_sys"])
+        p = phot.get(sid)
+        for pre, gcol, rest in (("ha", "grating_ha", HA_REST), ("hb", "grating_hb", HB_REST)):
+            g = r[gcol]
+            if not isinstance(g, str):
+                continue
+            if a.slit_mode == "dja":
+                out.loc[i, [f"{pre}_slit_factor", f"{pre}_slit_factor_err"]] = 1.0, 0.0
+                out.loc[i, f"{pre}_slit_source"] = "dja"
+                continue
+            if p is None or not p["bands"]:
+                out.loc[i, f"{pre}_slit_note"] = "no PRIMER+MINERVA match"
+                continue
+            digits = {int(c) for c in str(int(p["flag"]))} if np.isfinite(p["flag"]) else set()
+            if (not a.allow_flagged_phot) and digits & {1, 2, 3}:
+                out.loc[i, f"{pre}_slit_note"] = f"photometry Flag {int(p['flag'])}"
+                continue
+            if (not a.allow_blends) and p.get("blend"):
+                out.loc[i, f"{pre}_slit_note"] = "blended in PRIMER+MINERVA"
+                continue
+            best, why = direct_slit_factor(sid, g, rest * (1 + z), p["bands"], curves, a)
+            if best is None:
+                out.loc[i, f"{pre}_slit_note"] = why
+                continue
+            out.loc[i, f"{pre}_slit_filter"] = best["filt"]
+            out.loc[i, f"{pre}_slit_factor"] = best["factor"]
+            out.loc[i, f"{pre}_slit_factor_err"] = best["factor_err"]
+            out.loc[i, f"{pre}_slit_coverage"] = best["cov"]
+            out.loc[i, f"{pre}_slit_phot_ujy"] = best["phot"] * 1e6
+            out.loc[i, f"{pre}_slit_synth_ujy"] = best["synth"] * 1e6
+            out.loc[i, f"{pre}_slit_source"] = "direct"
+
+    # sample-median fallback
+    for pre in ("ha", "hb"):
+        direct = out.loc[out[f"{pre}_slit_source"] == "direct", f"{pre}_slit_factor"].to_numpy()
+        need = out[f"{pre}_flux_uncorr"].notna() & out[f"{pre}_slit_source"].isna()
+        if a.slit_mode == "phot":
+            if len(direct) >= a.min_for_median:
+                med = float(np.median(direct))
+                nmad = 1.4826 * float(np.median(np.abs(direct - med)))
+                out.loc[need, f"{pre}_slit_factor"] = med
+                out.loc[need, f"{pre}_slit_factor_err"] = nmad
+                out.loc[need, f"{pre}_slit_source"] = "sample_median"
+                print(f"  {pre} slit factor: {len(direct)} direct, median {med:.3f}, "
+                      f"NMAD {nmad:.3f}, applied to {int(need.sum())} sources")
+            else:
+                print(f"  {pre} slit factor: only {len(direct)} direct, no median fallback")
+        f, fe = out[f"{pre}_flux_uncorr"], out[f"{pre}_flux_uncorr_err"]
+        s, se = out[f"{pre}_slit_factor"], out[f"{pre}_slit_factor_err"]
+        out[f"{pre}_flux_slitcorr"] = f * s
+        out[f"{pre}_flux_slitcorr_err"] = np.abs(f * s) * np.sqrt((fe / f) ** 2 + (se / s) ** 2)
+
+
+# ============================================================================
+# Step 4: Balmer decrement
+# ============================================================================
+
+def balmer_mc(fha, eha, fhb, ehb, sha, esha, shb, eshb, slit_in_ratio, n, rng):
+    ha = rng.normal(fha, eha, n)
+    hb = rng.normal(fhb, ehb, n)
+    s_ha = rng.normal(sha, esha, n)
+    ratio = (ha * s_ha) / (hb * rng.normal(shb, eshb, n)) if slit_in_ratio else ha / hb
+    good = (ha > 0) & (hb > 0) & (s_ha > 0) & (ratio > 0)
+    ratio, ha_corr = ratio[good], (ha * s_ha)[good]
     ebv = np.clip(2.5 / (K_HB - K_HA) * np.log10(ratio / R_INT), 0.0, None)
     a_ha = K_HA * ebv
     full = ha_corr * 10 ** (0.4 * a_ha)
@@ -505,216 +469,148 @@ def balmer_mc(fha, eha, fhb, ehb, sha, esha, shb, eshb, use_slit_in_ratio, rng):
     def pct(x):
         p16, p50, p84 = np.percentile(x, [16, 50, 84])
         return p50, p50 - p16, p84 - p50
+    return dict(ratio=pct(ratio), ebv=pct(ebv), a_ha=pct(a_ha), full=pct(full),
+                frac_dropped=1 - good.mean())
 
-    return dict(ratio=pct(ratio), ebv=pct(ebv), a_ha=pct(a_ha),
-                full=pct(full), frac_dropped=1 - good.mean())
 
-
-# ----------------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------------
-def main():
-    global OUT_CSV
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--download-filters", action="store_true",
-                   help="Download the NIRCam filter curves from SVO and exit.")
-    p.add_argument("--slit-mode", choices=["dja", "phot"], default="phot",
-                   help="phot (default): correct the spectrum to the comparison photometry "
-                        "by filter convolution. dja: trust the msaexp path-loss correction "
-                        "already in the DJA spectra, slit factor 1.")
-    p.add_argument("--phot-cats", nargs="+", default=PHOT_CATALOGUES,
-                   help="Photometric catalogue(s) to compare against. The first one "
-                        "containing the ID is used. Default: the four JELS_F356W_DJA "
-                        "catalogues.")
-    p.add_argument("--phot-id-col", default=PHOT["id_col"],
-                   help="ID column in the photometric catalogues. Default ID.")
-    p.add_argument("--phot-base", default=PHOT["base"],
-                   help="Column name stem with {filt} for the filter, e.g. "
-                        "'NIRCam_{filt}_APER_600_mas' (default) or a larger aperture.")
-    p.add_argument("--flux-suffix", default=PHOT["flux"])
-    p.add_argument("--err-suffix", default=PHOT["err"])
-    p.add_argument("--mag-suffix", default=PHOT["mag"],
-                   help="Used only to infer the flux unit.")
-    p.add_argument("--flux-unit-jy", type=float, default=None,
-                   help="Flux unit in Jy (e.g. 1e-9 for nJy). Set this if the catalogue "
-                        "has no magnitude columns. Default: infer from magnitudes.")
-    p.add_argument("--balmer-basis", choices=["auto", "slitcorr"], default=BALMER_BASIS,
-                   help="auto (default): Balmer ratio from the observed fluxes when both "
-                        "lines come from one grating, slit-corrected otherwise. slitcorr: "
-                        "always slit-corrected.")
-    p.add_argument("--out", default=OUT_CSV,
-                   help=f"Output CSV. Default {OUT_CSV}")
-    args = p.parse_args()
-    OUT_CSV = args.out
-    PHOT.update(cats=args.phot_cats, id_col=args.phot_id_col, base=args.phot_base,
-                flux=args.flux_suffix, err=args.err_suffix, mag=args.mag_suffix,
-                unit_jy=args.flux_unit_jy)
-
-    print("build_ha_flux_corrections.py")
-    if args.download_filters:
-        print(f"Downloading NIRCam filter curves to {os.path.abspath(FILTER_DIR)}")
-        download_filters()
-        return
-
-    print(f"  sample        {os.path.abspath(ZSYS_CSV)}")
-    print(f"  Ha fluxes     {os.path.abspath(HA_SUMMARY)}")
-    print(f"  Hb fluxes     {os.path.abspath(HB_SUMMARY)}")
-    print(f"  slit mode     {args.slit_mode}")
-    if args.slit_mode == "phot":
-        print(f"  spectra       {os.path.abspath(SPEC_ROOT)}/<grating>/")
-        print(f"  filters       {os.path.abspath(FILTER_DIR)}")
-        print(f"  phot columns  {phot_cols('<FILT>')[0]}, {phot_cols('<FILT>')[1]}")
-    print(f"  output        {os.path.abspath(OUT_CSV)}")
-    print(f"  k(Ha) {K_HA:.3f}  k(Hb) {K_HB:.3f}  (Calzetti 2000, R_V {RV_CALZETTI})")
-
-    sample = load_sample()
-    ha_s, hb_s = load_summary(HA_SUMMARY), load_summary(HB_SUMMARY)
-    curves, cats = None, None
-    if args.slit_mode == "phot":
-        curves = load_filters()
-        cats = load_photometry()
-
-    rows = []
-    for _, src in sample.iterrows():
-        sid, z = int(src["ID"]), float(src["z_sys"])
-        r = src.to_dict()
-        ha, hb = line_fluxes(ha_s, sid, "Ha"), line_fluxes(hb_s, sid, "Hbeta")
-        g_ha, g_hb = choose_gratings(ha, hb)
-        r["grating_ha"], r["grating_hb"] = g_ha, g_hb
-        r["same_grating"] = bool(g_ha and g_hb and g_ha == g_hb)
-        for pre, d, g in (("ha", ha, g_ha), ("hb", hb, g_hb)):
-            f, e, s = d[g] if g else (np.nan, np.nan, np.nan)
-            r[f"{pre}_flux_uncorr"], r[f"{pre}_flux_uncorr_err"], r[f"{pre}_flux_uncorr_snr"] = f, e, s
-
-        phot = source_photometry(cats, sid) if args.slit_mode == "phot" else {}
-        for pre, g, rest in (("ha", g_ha, HA_REST), ("hb", g_hb, HB_REST)):
-            r[f"{pre}_slit_filter"] = None
-            r[f"{pre}_slit_factor"] = np.nan
-            r[f"{pre}_slit_factor_err"] = np.nan
-            r[f"{pre}_slit_source"] = None
-            r[f"{pre}_slit_note"] = ""
-            r[f"{pre}_slit_coverage"] = np.nan
-            if g is None:
-                continue
-            if args.slit_mode == "dja":
-                # Trust the msaexp path-loss correction already in the DJA spectra.
-                r[f"{pre}_slit_factor"] = 1.0
-                r[f"{pre}_slit_factor_err"] = 0.0
-                r[f"{pre}_slit_source"] = "dja"
-                continue
-            best, why = direct_slit_factor(sid, g, rest * (1 + z), phot, curves)
-            if best is not None:
-                r[f"{pre}_slit_filter"] = best["filt"]
-                r[f"{pre}_slit_factor"] = best["factor"]
-                r[f"{pre}_slit_factor_err"] = best["factor_err"]
-                r[f"{pre}_slit_source"] = "direct"
-                r[f"{pre}_slit_coverage"] = best["cov"]
-            else:
-                r[f"{pre}_slit_note"] = why
-        rows.append(r)
-
-    out = pd.DataFrame(rows)
-    out["slit_reference"] = (f"{phot_cols('<FILT>')[0]}" if args.slit_mode == "phot"
-                             else "dja_pathloss_only")
-
-    # ---- sample-median fallback ----
-    for pre in ("ha", "hb"):
-        direct = out.loc[out[f"{pre}_slit_source"] == "direct", f"{pre}_slit_factor"].to_numpy()
-        need = out[f"{pre}_flux_uncorr"].notna() & out[f"{pre}_slit_source"].isna()
-        if args.slit_mode == "dja":
-            pass
-        elif len(direct) >= MIN_FOR_MEDIAN:
-            med = np.median(direct)
-            nmad = 1.4826 * np.median(np.abs(direct - med))
-            out.loc[need, f"{pre}_slit_factor"] = med
-            out.loc[need, f"{pre}_slit_factor_err"] = nmad
-            out.loc[need, f"{pre}_slit_source"] = "sample_median"
-            print(f"  {pre} slit factor: {len(direct)} direct, median {med:.3f}, "
-                  f"NMAD {nmad:.3f}, applied to {int(need.sum())} sources")
-        else:
-            print(f"  {pre} slit factor: only {len(direct)} direct, no median fallback")
-
-        f, fe = out[f"{pre}_flux_uncorr"], out[f"{pre}_flux_uncorr_err"]
-        s, se = out[f"{pre}_slit_factor"], out[f"{pre}_slit_factor_err"]
-        out[f"{pre}_flux_slitcorr"] = f * s
-        out[f"{pre}_flux_slitcorr_err"] = np.abs(f * s) * np.sqrt((fe / f) ** 2 + (se / s) ** 2)
-
-    # ---- Balmer decrement ----
-    # Two versions are always computed.
-    #   main: Halpha slit-loss corrected to the comparison photometry.
-    #   _dja: slit factor 1 for both lines, i.e. trust the msaexp path-loss
-    #         correction in the DJA spectra as it stands.
-    rng = np.random.default_rng(MC_SEED)
+def dust_correct(out, a):
+    rng = np.random.default_rng(a.seed)
     cols = ["balmer_ratio", "ebv_neb", "A_ha", "ha_flux_fullcorr"]
     keys = ("ratio", "ebv", "a_ha", "full")
     for c in cols:
         for v in ("", "_dja"):
-            for suff in ("", "_err_lo", "_err_hi"):
-                out[c + v + suff] = np.nan
+            for s in ("", "_err_lo", "_err_hi"):
+                out[c + v + s] = np.nan
     out["dust_method"] = None
     out["balmer_basis"] = None
     for i, r in out.iterrows():
-        obs = [r["ha_flux_uncorr"], r["ha_flux_uncorr_err"], r["hb_flux_uncorr"], r["hb_flux_uncorr_err"]]
+        obs = [r["ha_flux_uncorr"], r["ha_flux_uncorr_err"],
+               r["hb_flux_uncorr"], r["hb_flux_uncorr_err"]]
         if not all(np.isfinite(v) for v in obs):
             continue
-        if r["ha_flux_uncorr_snr"] < HB_SNR_MIN or r["hb_flux_uncorr_snr"] < HB_SNR_MIN:
+        if r["ha_flux_uncorr_snr"] < a.line_snr_min or r["hb_flux_uncorr_snr"] < a.line_snr_min:
             continue
         out.loc[i, "dust_method"] = "balmer"
-
-        # DJA-only version: no extra slit factor on either line
-        mc = balmer_mc(*obs, 1.0, 0.0, 1.0, 0.0, False, rng)
-        for c, key in zip(cols, keys):
-            out.loc[i, c + "_dja"], out.loc[i, c + "_dja_err_lo"], out.loc[i, c + "_dja_err_hi"] = mc[key]
-
-        # Photometric slit-loss version
-        slit = [r["ha_slit_factor"], r["ha_slit_factor_err"], r["hb_slit_factor"], r["hb_slit_factor_err"]]
+        mc = balmer_mc(*obs, 1.0, 0.0, 1.0, 0.0, False, a.n_mc, rng)
+        for c, k in zip(cols, keys):
+            out.loc[i, [c + "_dja", c + "_dja_err_lo", c + "_dja_err_hi"]] = mc[k]
+        slit = [r["ha_slit_factor"], r["ha_slit_factor_err"],
+                r["hb_slit_factor"], r["hb_slit_factor_err"]]
         if not all(np.isfinite(v) for v in slit):
             continue
-        slit_in_ratio = (args.balmer_basis == "slitcorr") or not bool(r["same_grating"])
-        mc = balmer_mc(*obs, *slit, slit_in_ratio, rng)
-        out.loc[i, "balmer_basis"] = "slitcorr" if slit_in_ratio else "observed_same_grating"
-        for c, key in zip(cols, keys):
-            out.loc[i, c], out.loc[i, c + "_err_lo"], out.loc[i, c + "_err_hi"] = mc[key]
+        in_ratio = (a.balmer_basis == "slitcorr") or not bool(r["same_grating"])
+        mc = balmer_mc(*obs, *slit, in_ratio, a.n_mc, rng)
+        out.loc[i, "balmer_basis"] = "slitcorr" if in_ratio else "observed_same_grating"
+        for c, k in zip(cols, keys):
+            out.loc[i, [c, c + "_err_lo", c + "_err_hi"]] = mc[k]
         if mc["frac_dropped"] > 0.01:
-            print(f"  ID {r['ID']}: {100*mc['frac_dropped']:.1f}% of MC draws had a non-positive flux")
+            print(f"  ID {int(r['ID'])}: {100*mc['frac_dropped']:.1f}% of MC draws non-positive")
+    return cols
 
-    order = (["ID", "grating", "z_dja", "z_sys", "z_sys_err", "duplicate",
+
+# ============================================================================
+# Main
+# ============================================================================
+
+def main():
+    a = parse_args()
+    print("build_ha_flux_corrections.py")
+    if a.download_filters:
+        print(f"Filter curves in {os.path.abspath(FILTER_DIR)}")
+        download_filters()
+        return
+
+    print("[CONFIG]")
+    print(f"  sample        {os.path.abspath(a.zsys_csv)}")
+    print(f"  Ha fluxes     {os.path.abspath(a.ha_summary)}")
+    print(f"  Hb fluxes     {os.path.abspath(a.hb_summary)}")
+    print(f"  slit mode     {a.slit_mode}")
+    if a.slit_mode == "phot":
+        print(f"  photometry    {os.path.abspath(a.phot_csv)}  ({a.phot} fluxes)")
+        print(f"  spectra       {os.path.abspath(SPEC_ROOT)}/<grating>/")
+        print(f"  filters       {os.path.abspath(FILTER_DIR)}")
+    print(f"  output        {os.path.abspath(a.out)}")
+    print(f"  k(Ha) {K_HA:.3f}  k(Hb) {K_HB:.3f}  (Calzetti 2000)\n")
+
+    out = load_sample(a.zsys_csv, a.in_muse_only)
+    ha_s, hb_s = load_summary(a.ha_summary), load_summary(a.hb_summary)
+    phot = load_photometry(a.phot_csv, a.phot) if a.slit_mode == "phot" or os.path.exists(a.phot_csv) else {}
+    curves = load_filters() if a.slit_mode == "phot" else None
+
+    # Step 2: line fluxes
+    rows = []
+    for _, r in out.iterrows():
+        sid = int(r["ID"])
+        ha, hb = line_fluxes(ha_s, sid, "Ha"), line_fluxes(hb_s, sid, "Hbeta")
+        g_ha, g_hb = choose_gratings(ha, hb, a.line_snr_min)
+        d = dict(grating_ha=g_ha, grating_hb=g_hb, same_grating=bool(g_ha and g_hb and g_ha == g_hb))
+        for pre, lines, g in (("ha", ha, g_ha), ("hb", hb, g_hb)):
+            fl, er, sn = lines[g] if g else (np.nan, np.nan, np.nan)
+            d[f"{pre}_flux_uncorr"], d[f"{pre}_flux_uncorr_err"], d[f"{pre}_flux_uncorr_snr"] = fl, er, sn
+        p = phot.get(sid, {})
+        d["pm_sep_arcsec"] = p.get("sep", np.nan)
+        d["pm_flag"] = p.get("flag", np.nan)
+        d["pm_total_correction"] = p.get("tc", np.nan)
+        rows.append(d)
+    out = pd.concat([out, pd.DataFrame(rows)], axis=1)
+    out["phot_mode"] = a.phot if a.slit_mode == "phot" else "none"
+    out["slit_reference"] = (f"PRIMER+MINERVA {a.phot}" if a.slit_mode == "phot"
+                             else "dja_pathloss_only")
+
+    # Step 3: slit loss
+    slit_factors(out, phot, curves, a)
+
+    # Step 4: dust
+    cols = dust_correct(out, a)
+
+    # Write
+    order = (["ID", "z_sys", "z_sys_err", "z_sys_line", "in_muse", "duplicate",
+              "pm_sep_arcsec", "pm_flag", "pm_total_correction", "phot_mode",
               "grating_ha", "grating_hb", "same_grating", "slit_reference",
               "ha_flux_uncorr", "ha_flux_uncorr_err", "ha_flux_uncorr_snr",
               "hb_flux_uncorr", "hb_flux_uncorr_err", "hb_flux_uncorr_snr"]
              + [f"{p}_{c}" for p in ("ha", "hb") for c in
-                ("slit_filter", "slit_coverage", "slit_factor", "slit_factor_err", "slit_source", "slit_note",
+                ("slit_filter", "slit_coverage", "slit_phot_ujy", "slit_synth_ujy",
+                 "slit_factor", "slit_factor_err", "slit_source", "slit_note",
                  "flux_slitcorr", "flux_slitcorr_err")]
              + [c + s for c in cols for s in ("", "_err_lo", "_err_hi")] + ["balmer_basis"]
-             + [c + "_dja" + s for c in cols for s in ("", "_err_lo", "_err_hi")] + ["dust_method"])
-    out = out[order].sort_values("ID")
-    os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
-    out.to_csv(OUT_CSV, index=False)
-
-    # ---- compact values-only table ----
-    compact_cols = ["ID", "z_sys",
-                    "ha_flux_uncorr", "ha_flux_uncorr_err",
-                    "ha_flux_slitcorr", "ha_flux_slitcorr_err",
-                    "ha_flux_fullcorr", "ha_flux_fullcorr_err_lo", "ha_flux_fullcorr_err_hi",
-                    "ha_flux_fullcorr_dja", "ha_flux_fullcorr_dja_err_lo", "ha_flux_fullcorr_dja_err_hi",
-                    "hb_flux_uncorr", "hb_flux_uncorr_err",
-                    "hb_flux_slitcorr", "hb_flux_slitcorr_err"]
-    compact_csv = os.path.splitext(OUT_CSV)[0] + "_values.csv"
-    out[compact_cols].to_csv(compact_csv, index=False)
+             + [c + "_dja" + s for c in cols for s in ("", "_err_lo", "_err_hi")]
+             + ["dust_method"])
+    out = out[[c for c in order if c in out.columns]].sort_values("ID")
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    out.to_csv(a.out, index=False)
+    compact = os.path.splitext(a.out)[0] + "_values.csv"
+    out[["ID", "z_sys", "ha_flux_uncorr", "ha_flux_uncorr_err",
+         "ha_flux_slitcorr", "ha_flux_slitcorr_err",
+         "ha_flux_fullcorr", "ha_flux_fullcorr_err_lo", "ha_flux_fullcorr_err_hi",
+         "ha_flux_fullcorr_dja", "ha_flux_fullcorr_dja_err_lo", "ha_flux_fullcorr_dja_err_hi",
+         "hb_flux_uncorr", "hb_flux_uncorr_err", "hb_flux_slitcorr",
+         "hb_flux_slitcorr_err"]].to_csv(compact, index=False)
 
     print("\n" + "=" * 60)
     print(f"  sources                     {len(out)}")
-    print(f"  with Ha flux                {int(out['ha_flux_uncorr'].notna().sum())}")
-    print(f"  with Hb flux                {int(out['hb_flux_uncorr'].notna().sum())}")
-    print(f"  Ha slit direct / median     {int((out['ha_slit_source']=='direct').sum())} / "
-          f"{int((out['ha_slit_source']=='sample_median').sum())}")
-    print(f"  Hb slit direct / median     {int((out['hb_slit_source']=='direct').sum())} / "
-          f"{int((out['hb_slit_source']=='sample_median').sum())}")
+    print(f"  matched to PRIMER+MINERVA   {int(out['pm_sep_arcsec'].notna().sum())}")
+    print(f"  with Ha / Hb flux           {int(out['ha_flux_uncorr'].notna().sum())} / "
+          f"{int(out['hb_flux_uncorr'].notna().sum())}")
+    for pre in ("ha", "hb"):
+        src = out[f"{pre}_slit_source"]
+        print(f"  {pre} slit direct / median     {int((src == 'direct').sum())} / "
+              f"{int((src == 'sample_median').sum())}")
+        filt = out.loc[src == "direct", f"{pre}_slit_filter"].value_counts()
+        if len(filt):
+            print(f"     filters used             " + ", ".join(f"{k} {v}" for k, v in filt.items()))
     print(f"  Ha and Hb same grating      {int(out['same_grating'].sum())}")
-    print(f"  Balmer corrected            {int((out['dust_method']=='balmer').sum())}")
-    print(f"  full output                 {os.path.abspath(OUT_CSV)}")
-    print(f"  values-only output          {os.path.abspath(compact_csv)}")
+    print(f"  Balmer corrected            {int((out['dust_method'] == 'balmer').sum())}")
+    for c in ("ha_slit_factor", "balmer_ratio"):
+        v = out[c].dropna()
+        if len(v):
+            print(f"  {c:26s}  median {v.median():.2f}  (16-84: "
+                  f"{v.quantile(.16):.2f}-{v.quantile(.84):.2f})")
+    tot = (out["ha_flux_fullcorr"] / out["ha_flux_uncorr"]).dropna()
+    if len(tot):
+        print(f"  total Ha correction factor  median {tot.median():.2f}, max {tot.max():.1f}")
+    print(f"  full output                 {os.path.abspath(a.out)}")
+    print(f"  values-only output          {os.path.abspath(compact)}")
     print("=" * 60)
 
 

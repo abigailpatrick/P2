@@ -9,3 +9,4 @@ data/
 # SLURM and runtime logs
 *.log
 *.err
+jwst_catalogs/dja_msaexp_emission_lines_*.csv.gz

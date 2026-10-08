@@ -71,7 +71,8 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fits-csv", default=f"{F.CAT_DIR}/muv_beta_by_JELS_ID.csv")
     p.add_argument("--cat-dir", default=F.CAT_DIR)
-    p.add_argument("--aper", default="600")
+    p.add_argument("--aper", default="total", choices=["total", "aperture"],
+                   help="Must match the fit_muv_beta.py run.")
     p.add_argument("--lya-cut", type=float, default=1250.0)
     p.add_argument("--uv-max", type=float, default=3000.0)
     p.add_argument("--out-csv", default=f"{F.CAT_DIR}/muv_beta_diagnostics.csv")

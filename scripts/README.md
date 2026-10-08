@@ -3,7 +3,7 @@
 Spectroscopy of Lyα emitters at 3 < z < 6 with VLT/MUSE and JWST/NIRSpec. Every script lives in this folder and is run from the terminal on the cluster.
 
 ```bash
-conda activate env39
+conda activate env39 (or env312 for the lime fits)
 cd /ceph/cephfs/apatrick/P2/scripts
 ```
 
@@ -233,7 +233,14 @@ python group_by_manual.py
 
 ### F. Galaxy properties
 
+**21b. Match to PRIMER + MINERVA** `match_primer_minerva.py`
+Matches every JELS source to Isaac's COSMOS catalogue (`jwst_catalogs/cosmos_primer_minerva_production.fits`) by position, within 0.3 arcsec. Writes `jwst_catalogs/primer_minerva_by_JELS_ID.csv`, one row per JELS ID. Each row has the match, the catalogue flag and total correction, the photo-z and LePhare mass, and for each of the 19 bands the aperture flux (`<band>_ap`) and the total flux (`<band>_tot`, aperture × total_correction), all in µJy. Steps 22 to 24 and 28 read it. Only rerun when the catalogue or the source list changes.
+```bash
+python match_primer_minerva.py
+```
+
 **22. M_UV and β** `fit_muv_beta.py`
+Uses the PRIMER + MINERVA total fluxes by default (`--aper aperture` for the aperture fluxes), including the MINERVA medium bands.
 Writes `jwst_catalogs/muv_beta_by_JELS_ID.csv` and `jwst_spectra/MUV_fits/<ID>/<ID>_muv_beta_fit.png`.
 ```bash
 python fit_muv_beta.py --all
@@ -247,13 +254,14 @@ Writes `jwst_catalogs/muv_beta_diagnostics.csv` and `plots/muv_beta_diagnostics.
 python muv_beta_diagnostics.py
 ```
 
-**24. Hα corrections** `build_ha_flux_corrections.py` (to be rewritten)
-Writes `jwst_catalogs/ha_hb_flux_corrections.csv` and `_values.csv`.
+**24. Hα and Hβ corrections** `build_ha_flux_corrections.py`
+Slit-loss correction of the NIRSpec line fluxes to the PRIMER + MINERVA total photometry, then the Balmer-decrement dust correction. Writes `jwst_catalogs/ha_hb_flux_corrections.csv` and `_values.csv`. The method is described at the top of the script.
 ```bash
-python build_ha_flux_corrections.py --download-filters   # once
+python build_ha_flux_corrections.py --download-filters   # once, gets the medium-band filter curves
 python build_ha_flux_corrections.py
-python build_ha_flux_corrections.py --phot-base 'NIRCam_{filt}_APER_2_as' \
-  --out /ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections_2as.csv
+python build_ha_flux_corrections.py --phot aperture \
+  --out /ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections_aper.csv
+python build_ha_flux_corrections.py --slit-mode dja    # DJA path loss only, no photometric correction
 ```
 
 ### G. Figures
@@ -271,10 +279,11 @@ Writes to `plots/`.
 python plot_lya_science.py --label all
 ```
 
-**27. Stacks** `stack_lya_systematic.py` (to be rewritten)
-Writes to `plots/stacks/`.
+**27. Stacks** `stack_lya_systematic.py`
+Systemic-anchored stacks in bins of any master column, normalised by f1500, Hα or nothing. Writes composites, measurements and figures to `plots/stacks/`.
 ```bash
-python stack_lya_systematic.py
+python stack_lya_systematic.py --norms f1500 halpha none --nboot 100
+python stack_lya_systematic.py --splits z_sys:3.5 M_UV:-19 beta:-2
 ```
 
 ### H. Master catalogue
@@ -284,7 +293,6 @@ Writes `master_catalog/p2_master_catalog.csv` and `master_catalog/p2_master_colu
 ```bash
 python build_master_catalog.py --dry-run   # show what would change
 python build_master_catalog.py
-python build_master_catalog.py --ha-csv /ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections_2as.csv
 ```
 
 ## What depends on what
@@ -298,7 +306,8 @@ When an input changes, these are the steps downstream of it. Steps marked * can 
 | continuum subtraction settings | 9 to 14, 15 to 17 if the good sample is affected, then 18 to 21, 28 |
 | a Lyα fit setting | 13, 14, 18 to 21, 28 |
 | a by-eye label | edit `lya_manual_labels.csv`, then 21, 28 |
-| photometry or Hα method | 22 to 24, 28 |
+| photometry catalogue | 21b, 22 to 24, 27, 28 |
+| Hα method | 24, 27, 28 |
 | SED or fesc outputs | 28 |
 
 Step 7 lists the sources whose z_sys changed. The master also carries `zsys_mismatch_kms`, the difference between the z the MUSE products were made with and the current one.
@@ -374,27 +383,20 @@ sample, zsys, Lyα detection, Lyα fit, Δv, tier, manual labels, UV, Hα/Hβ fl
 - Port `--force-double`, `--cont-side` and `--mask` into `lime_OIII_singlereview.py`.
 - AO gap flag and the edge false-position rejection.
 
-**Hα corrections rewrite** (`build_ha_flux_corrections.py`)
+**Hα corrections** (`build_ha_flux_corrections.py`)
 
-- Take the sample and z_sys from the master (primary sources only).
-- Split it into small steps, each its own function with its own output columns. These are line flux choice, slit-loss factor, dust correction and MC errors.
-- Dust from the Balmer decrement where both lines pass the S/N cut. Otherwise SED A_V scaled to Hα with Calzetti, as in Paper 1, which needs the SED block.
-- Keep the photometry configurable so Isaac's total-flux catalogue drops in without code changes.
-- Check the size of the corrections. In the committed 2 arcsec run the median total is ×4.4 (slit ×1.6, Balmer ×2.6), the largest is ×46 and the median Balmer ratio is 4.0.
-- Decide which aperture the Hα flux is corrected to, since the Lyα flux is a 0.6 arcsec MUSE aperture flux.
-- Write fixed column names to one output file that the master reads.
+- Add the SED dust fallback (A_V from Ken's fits scaled to Hα) for sources without a usable Hβ.
+- Check the size of the corrections with the new total photometry. With the old 0.6 arcsec photometry the median total was ×4.4 and the largest ×46.
+- Decide how to match the Lyα aperture. The Hα is now corrected to total, but the Lyα flux is a 0.6 arcsec MUSE aperture flux, so fesc needs either a total Lyα flux or an aperture Hα.
 
-**Stacking rewrite** (`stack_lya_systematic.py`)
+**Stacking** (`stack_lya_systematic.py`)
 
-- Select the sample from master columns (in_muse, is_primary, z_sys present, outside the AO gap) instead of a hard-coded exclude list.
-- Bin on any master column from the command line (z, M_UV, β, later mass and EW).
-- Separate the stacking (CSV of composites) from the plotting.
-- Keep systemic anchoring and no Lyα normalisation. Add median or mean, and UV or Hα normalisation, as options to compare with Tang et al. 2024.
+- Fix the per-pixel clipping (clip whole sources instead) and measure B/R against a local baseline, once the choices on the decision list are agreed.
 
 **SED inputs** (new script)
 
-- Read the BAGPIPES JELS catalogue (Pirie et al. 2025, as in Paper 1) and match on JELS ID.
-- Apply the Kron to 0.6 arcsec aperture correction to M* and SFR.
+- Read Ken's BAGPIPES fits (run on the PRIMER + MINERVA catalogue) and match on JELS ID, through `primer_minerva_by_JELS_ID.csv` if they are keyed on the catalogue Number.
+- Correct M* and SFR to total with `pm_total_correction` if the fits used aperture fluxes.
 - Write `sed_logM`, `sed_sfr10`, `sed_ssfr10`, `sed_av`, `sed_ebv` and their errors, the names the master already expects.
 - Those fits used photometric redshift priors. Check whether any sources need refitting at z_sys.
 

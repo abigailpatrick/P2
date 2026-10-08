@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Measure the UV slope beta and absolute UV magnitude M_UV for each P2 source by
-fitting a power law to the JELS/PRIMER rest-frame UV photometry.
+fitting a power law to the PRIMER + MINERVA rest-frame UV photometry
+(Holst et al. in prep., matched to JELS by match_primer_minerva.py).
 
 Method (follows Paper 1, Section 2.4, after Pirie et al. 2025)
 ----------------------------------------------------------------
@@ -33,10 +34,15 @@ At least MIN_FILTERS (default 2) filters are needed to fit.
 
 Photometry
 ----------
-Aperture-corrected 0.6 arcsec photometry, <INST>_<FILT>_APER_600_mas_flux_corr
-and _fluxerr_corr, as in Paper 1. The flux unit is checked per column from the
-matching _mag_corr column (zero point 23.9 = uJy, 31.4 = nJy) rather than
-trusted from the header.
+primer_minerva_by_JELS_ID.csv (match_primer_minerva.py), uJy, Milky Way
+extinction corrected. --aper total (default) uses the aperture fluxes times
+the catalogue's total_correction, so M_UV is a total magnitude. beta is a
+colour, so it is the same either way. --aper aperture uses the 0.3 / 0.5
+arcsec aperture fluxes as they are (Paper 1 used 0.6 arcsec aperture-
+corrected fluxes from the older JELS catalogue). The MINERVA medium bands
+(F140M, F162M, F182M, F210M) add points in the rest-frame UV. The catalogue's
+photometry flag is carried through as pm_flag (1-3 mean the photometry may be
+affected by a star or bright neighbour), the fit is still made.
 
 Redshift
 --------
@@ -46,9 +52,8 @@ passes, z_av from grating_sources_by_JELS_ID.csv.
 
 Catalogue lookup
 ----------------
-The four per-grating FITS catalogues are searched in order. Once a source is
-found in one, its photometry is taken from that catalogue and the rest are not
-checked. Matching is on the JELS ID column (not srcid).
+By JELS ID in primer_minerva_by_JELS_ID.csv. Sources with no match within
+0.3 arcsec get fit_flag = no_photometry.
 
 Where the numbers come from
 ---------------------------
@@ -92,12 +97,7 @@ from scipy.optimize import curve_fit
 P2 = "/ceph/cephfs/apatrick/P2"
 CAT_DIR = f"{P2}/jwst_catalogs"
 
-FITS_CATALOGUES = [
-    "JELS_F356W_DJA_G235H_F170LP_match_0p3as.fits",
-    "JELS_F356W_DJA_G235M_F170LP_match_0p3as.fits",
-    "JELS_F356W_DJA_G395H_F290LP_match_0p3as.fits",
-    "JELS_F356W_DJA_G395M_F290LP_match_0p3as.fits",
-]
+PHOT_CSV = "primer_minerva_by_JELS_ID.csv"   # in --cat-dir, from match_primer_minerva.py
 
 # ---------------------------------------------------------------------------
 # Filter wavelengths. Every number below is copied from the page cited for it,
@@ -133,6 +133,21 @@ NIRCAM_JDOX = {
     "F470N": (4.707, 4.683, 4.733),
 }
 
+# SVO: NIRCam medium bands in the PRIMER+MINERVA catalogue that the JDox table
+# above does not list here. filter -> (SVO filter ID, WavelengthPivot,
+# WavelengthCen, FWHM) in Angstrom, read from
+# http://svo2.cab.inta-csic.es/theory/fps/fps.php?ID=JWST/NIRCam.<FILT>
+NIRCAM_SVO = {
+    "F140M": ("JWST/NIRCam.F140M", 14053.232536752, 14055.471891322, 1471.7453241243),
+    "F162M": ("JWST/NIRCam.F162M", 16272.470828066, 16279.44469614, 1710.0509900877),
+    "F182M": ("JWST/NIRCam.F182M", 18451.671760304, 18451.438545284, 2450.0535142807),
+    "F210M": ("JWST/NIRCam.F210M", 20954.513115415, 20970.264415414, 2092.9556602331),
+    "F250M": ("JWST/NIRCam.F250M", 25032.325766786, 25035.347980395, 1824.9614459531),
+    "F300M": ("JWST/NIRCam.F300M", 29891.21134832, 29930.663423494, 3276.8424330832),
+    "F360M": ("JWST/NIRCam.F360M", 36241.760882275, 36217.330681244, 3855.305234812),
+    "F460M": ("JWST/NIRCam.F460M", 46299.277451031, 46317.872804161, 2329.5607509154),
+}
+
 # SVO: filter -> (column prefix, SVO filter ID, WavelengthPivot, WavelengthCen, FWHM) in Angstrom
 HST_SVO = {
     "F275W": ("WFC3UV", "HST/WFC3_UVIS2.F275W", 2702.9201281817, 2725.9113782663, 471.41940838989),
@@ -151,6 +166,8 @@ def build_filter_table():
     tab = {}
     for f, (piv, lo, hi) in NIRCAM_JDOX.items():
         tab[f] = ("NIRCam", piv * 1e4, lo * 1e4, hi * 1e4)
+    for f, (_, piv, cen, fwhm) in NIRCAM_SVO.items():
+        tab[f] = ("NIRCam", piv, cen - fwhm / 2, cen + fwhm / 2)
     for f, (inst, _, piv, cen, fwhm) in HST_SVO.items():
         tab[f] = (inst, piv, cen - fwhm / 2, cen + fwhm / 2)
     return dict(sorted(tab.items(), key=lambda kv: kv[1][1]))
@@ -183,8 +200,9 @@ def parse_args():
     p.add_argument("--out-csv", default=f"{CAT_DIR}/muv_beta_by_JELS_ID.csv")
     p.add_argument("--fig-root", default=f"{P2}/jwst_spectra/MUV_fits",
                    help="Plots go to <fig-root>/<ID>/<ID>_muv_beta_fit.png")
-    p.add_argument("--aper", default="600", choices=["300", "600", "900", "2"],
-                   help="Aperture in mas ('2' means 2 arcsec). Default 600.")
+    p.add_argument("--aper", default="total", choices=["total", "aperture"],
+                   help="total (default): aperture flux x total_correction. "
+                        "aperture: the 0.3/0.5 arcsec aperture fluxes as they are.")
     p.add_argument("--lya-cut", type=float, default=1250.0,
                    help="Rest-frame blue edge limit, Angstrom. Default 1250.")
     p.add_argument("--uv-max", type=float, default=3000.0,
@@ -205,10 +223,11 @@ def parse_args():
 # ----------------------------------------------------------------------------
 
 def col_names(filt, aper):
-    inst = FILTERS[filt][0]
-    ap = "2_as" if aper == "2" else f"{aper}_mas"
-    base = f"{inst}_{filt}_APER_{ap}"
-    return f"{base}_flux_corr", f"{base}_fluxerr_corr", f"{base}_mag_corr"
+    """Flux and error columns in primer_minerva_by_JELS_ID.csv (uJy).
+    The third entry is kept for compatibility and is never present."""
+    suf = "tot" if aper == "total" else "ap"
+    base = f"{filt.lower()}_{suf}"
+    return base, base + "_err", base + "_mag"
 
 
 def flux_unit_to_jy(tab, fcol, mcol):
@@ -226,28 +245,23 @@ def flux_unit_to_jy(tab, fcol, mcol):
 
 
 def load_catalogues(cat_dir, aper):
-    """Read the FITS catalogues once. Returns list of (name, table, {filt: Jy scale})."""
-    cats = []
-    for fname in FITS_CATALOGUES:
-        path = os.path.join(cat_dir, fname)
-        tab = Table.read(path).to_pandas()
-        tab["ID"] = tab["ID"].astype(int)
-        tab = tab.drop_duplicates(subset="ID").set_index("ID")
-        scales = {}
-        for filt in FILTERS:
-            fcol, ecol, mcol = col_names(filt, aper)
-            if fcol in tab.columns and ecol in tab.columns:
-                s = flux_unit_to_jy(tab, fcol, mcol) if mcol in tab.columns else None
-                scales[filt] = s
-        print(f"  read {os.path.abspath(path)}  ({len(tab)} unique IDs)")
-        cats.append((fname, tab, scales))
-    # fill in any unit we could not infer in one catalogue from another
-    for _, _, scales in cats:
-        for filt, s in scales.items():
-            if s is None:
-                others = [c[2].get(filt) for c in cats if c[2].get(filt) is not None]
-                scales[filt] = others[0] if others else None
-    return cats
+    """Read the matched PRIMER+MINERVA photometry once.
+    Returns [(name, table indexed by ID, {filt: Jy per unit})], one entry, in
+    the same shape as before so muv_beta_diagnostics.py works unchanged."""
+    path = os.path.join(cat_dir, PHOT_CSV)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} missing. Run match_primer_minerva.py first.")
+    tab = pd.read_csv(path)
+    tab["ID"] = tab["ID"].astype(int)
+    tab = tab[tab["pm_sep_arcsec"].notna()].set_index("ID")
+    scales = {}
+    for filt in FILTERS:
+        fcol, ecol, _ = col_names(filt, aper)
+        if fcol in tab.columns and ecol in tab.columns and tab[fcol].notna().any():
+            scales[filt] = 1e-6        # uJy -> Jy
+    print(f"  read {os.path.abspath(path)}  ({len(tab)} matched IDs, {aper} fluxes, "
+          f"bands {', '.join(scales)})")
+    return [("primer_minerva", tab, scales)]
 
 
 def pick_zsys(row, cuts):
@@ -255,10 +269,6 @@ def pick_zsys(row, cuts):
     z, _, _, line, _ = pc.pick_zsys(row, cuts)
     return (z, f"z_sys_{line}") if line else (np.nan, None)
 
-
-# ----------------------------------------------------------------------------
-# Fit
-# ----------------------------------------------------------------------------
 
 def select_filters(z, scales, row, aper, lya_cut, uv_max):
     """Return (used, unused) lists of dicts for one source."""
@@ -398,7 +408,7 @@ def main():
     print(f"Outputs{' (dry run, nothing written)' if a.dry_run else ''}")
     print(f"  csv           {os.path.abspath(a.out_csv)}")
     print(f"  figures       {os.path.abspath(a.fig_root)}/<ID>/<ID>_muv_beta_fit.png")
-    print(f"Aperture {a.aper} {'as' if a.aper == '2' else 'mas'}, "
+    print(f"Photometry: PRIMER+MINERVA {a.aper} fluxes, "
           f"rest-frame window: blue edge >= {a.lya_cut:.0f} A, pivot <= {a.uv_max:.0f} A\n")
 
     sources = pd.read_csv(a.sources_csv)
@@ -410,6 +420,18 @@ def main():
     ids = sources["ID"].tolist() if a.all else [a.id]
     print("Reading photometric catalogues")
     cats = load_catalogues(a.cat_dir, a.aper)
+    matched = set(cats[0][1].index)
+    cuts = {"OIII": a.oiii_snr_min, "Ha": a.ha_snr_min}
+    zsys_ids = [i for i in ids if i in systemic.index
+                and np.isfinite(pick_zsys(systemic.loc[i], cuts)[0])]
+    miss_all = [i for i in ids if i not in matched]
+    miss_zsys = [i for i in zsys_ids if i not in matched]
+    print("\n[MATCHES to PRIMER+MINERVA]")
+    print(f"  all sources          {len(ids) - len(miss_all)} of {len(ids)} matched")
+    print(f"  sources with z_sys   {len(zsys_ids) - len(miss_zsys)} of {len(zsys_ids)} matched")
+    print(f"  z_sys sources with no match: {miss_zsys if miss_zsys else 'none'}")
+    if len(miss_all) > len(miss_zsys):
+        print(f"  other unmatched (no z_sys):  {[i for i in miss_all if i not in miss_zsys]}")
     print()
 
     rows, used_cols = [], []
@@ -423,7 +445,7 @@ def main():
         if not np.isfinite(z):
             z, z_type = float(srow["z_av"].iloc[0]), "z_av"
 
-        out = dict(ID=src_id, z=z, z_type=z_type, phot_catalogue=None,
+        out = dict(ID=src_id, z=z, z_type=z_type, phot_catalogue=None, pm_flag=np.nan,
                    n_filters=0, filters_used="", beta=np.nan, beta_err=np.nan,
                    f1500_nJy=np.nan, m_UV=np.nan, M_UV=np.nan, M_UV_err=np.nan,
                    chi2=np.nan, dof=np.nan, fit_flag="")
@@ -431,11 +453,12 @@ def main():
         hit = next(((n, t.loc[src_id], s) for n, t, s in cats if src_id in t.index), None)
         if hit is None:
             out["fit_flag"] = "no_photometry"
-            print(f"[{src_id}] z={z:.4f} ({z_type})  not found in any FITS catalogue")
+            print(f"[{src_id}] z={z:.4f} ({z_type})  no PRIMER+MINERVA match")
             rows.append(out)
             continue
         cname, prow, scales = hit
         out["phot_catalogue"] = cname
+        out["pm_flag"] = prow.get("pm_flag", np.nan)
 
         used, unused = select_filters(z, scales, prow, a.aper, a.lya_cut, a.uv_max)
         out["n_filters"] = len(used)
@@ -461,7 +484,7 @@ def main():
                 out["fit_flag"] = "fit_failed"
                 print(f"  fit failed: {err}")
 
-        msg = (f"[{src_id}] z={z:.4f} ({z_type})  cat={cname.split('_')[3]}  "
+        msg = (f"[{src_id}] z={z:.4f} ({z_type})  flag={out['pm_flag']}  "
                f"used={out['filters_used'] or '-'}")
         if res is not None:
             msg += f"  beta={res['beta']:.2f}+/-{res['beta_err']:.2f}  " \
@@ -478,8 +501,8 @@ def main():
 
     # column order: ID, z, then the photometry used (in wavelength order), then results
     order = {f: i for i, f in enumerate(FILTERS)}
-    used_cols.sort(key=lambda c: (order[c.split("_")[1]], c.endswith("fluxerr_corr")))
-    front = ["ID", "z", "z_type", "phot_catalogue"]
+    used_cols.sort(key=lambda c: (order[c.split("_")[0].upper()], c.endswith("_err")))
+    front = ["ID", "z", "z_type", "phot_catalogue", "pm_flag"]
     back = ["n_filters", "filters_used", "beta", "beta_err", "f1500_nJy", "m_UV",
             "M_UV", "M_UV_err", "chi2", "dof", "err_scale", "fit_flag"]
     df = pd.DataFrame(rows).reindex(columns=front + used_cols + back)
@@ -488,7 +511,8 @@ def main():
     df["good_muv"] = ok & (df["M_UV_err"] < a.max_muv_err)
     df["good_beta"] = ok & (df["beta_err"] < a.max_beta_err)
 
-    print(f"\n{ok.sum()} of {len(df)} sources fitted")
+    print(f"\n{ok.sum()} of {len(df)} sources fitted "
+          f"({len(zsys_ids) - len(miss_zsys)} of {len(zsys_ids)} z_sys sources matched to PRIMER+MINERVA)")
     print(df["fit_flag"].value_counts().to_string())
     print(f"\n{(df['err_scale'] > 1).sum()} fits had chi2_nu > 1, "
           f"errors inflated by sqrt(chi2_nu)")

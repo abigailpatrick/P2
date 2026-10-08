@@ -27,6 +27,8 @@ Blocks (in column order), each read from one upstream file
   tier        lya_group_<tier>.csv  (automatic tier and pass/fail criteria)
   labels      lya_manual_labels.csv (by-eye a/b/c/d)
   uv          muv_beta_by_JELS_ID.csv
+  phot        primer_minerva_by_JELS_ID.csv (match, flag, total correction,
+              catalogue photo-z and LePhare mass)
   lines       Ha_summary_by_JELS_ID.csv, Hbeta_summary_by_JELS_ID.csv
   ha_corr     ha_hb_flux_corrections.csv (path set by --ha-csv)
   sed         placeholder, filled once the SED input script exists
@@ -132,6 +134,20 @@ BLOCKS = {
               ("good_beta", "good_beta", "", "Fit ok and beta_err < 0.5"),
               ("z", "uv_z", "", "Redshift used for the UV fit"),
               ("z_type", "uv_z_type", "", "Which redshift the UV fit used")]),
+    "phot": dict(
+        file="jwst_catalogs/primer_minerva_by_JELS_ID.csv",
+        cols=[("pm_number", "pm_number", "", "PRIMER+MINERVA catalogue Number"),
+              ("pm_sep_arcsec", "pm_sep_arcsec", "arcsec", "Separation of the PRIMER+MINERVA match"),
+              ("pm_n_within", "pm_n_within", "", "Catalogue sources within the match radius"),
+              ("pm_flag", "pm_flag", "", "PRIMER+MINERVA Flag (0 clean, 1-3 photometry, 4-6 photo-z)"),
+              ("pm_flag_phot_bad", "pm_flag_phot_bad", "", "Flag 1, 2 or 3"),
+              ("pm_blend", "pm_blend", "", "Comparably bright second object within 0.3 arcsec"),
+              ("pm_jels_outlier", "pm_jels_outlier", "", "F356W far from the JELS catalogue value"),
+              ("pm_ap_diam", "pm_ap_diam", "arcsec", "Aperture of the catalogue fluxes"),
+              ("pm_total_correction", "pm_total_correction", "", "Aperture to total flux factor"),
+              ("pm_z_phot", "pm_z_phot", "", "Catalogue photo-z (median of 5 runs)"),
+              ("pm_mass_lephare_total", "pm_logM_lephare", "log Msun",
+               "LePhare stellar mass at z_best, corrected to total")]),
     "lines_ha": dict(
         file="jwst_catalogs/Ha_summary_by_JELS_ID.csv",
         cols=[("Ha_flux_best", "ha_flux_best", "erg/s/cm2", "Observed [NII]-deblended Halpha flux, best-S/N grating, no corrections"),
@@ -606,6 +622,7 @@ def main():
     m = labels_block(m, a.labels_csv, root, dct, report)
     m = primary_flag(m, tier_ids, dct)
     m = add_simple_block(m, "uv", BLOCKS["uv"], root, dct, report)
+    m = add_simple_block(m, "phot", BLOCKS["phot"], root, dct, report)
     m = add_simple_block(m, "lines", BLOCKS["lines_ha"], root, dct, report)
     m = add_simple_block(m, "lines", BLOCKS["lines_hb"], root, dct, report)
     m = add_simple_block(m, "ha_corr", BLOCKS["ha_corr"], root, dct, report, a.ha_csv)

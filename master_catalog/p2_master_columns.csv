@@ -1,0 +1,156 @@
+column,block,source_file,source_column,unit,description
+ID,sample,,ID,,JELS ID
+ra,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,ra,deg,Right ascension (JELS)
+dec,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,dec,deg,Declination (JELS)
+is_primary,sample,(computed),duplicate,,False for the dropped member of a duplicate pair
+has_G235M,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,G235M,,Source has a G235M spectrum
+has_G235H,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,G235H,,Source has a G235H spectrum
+has_G395M,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,G395M,,Source has a G395M spectrum
+has_G395H,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,G395H,,Source has a G395H spectrum
+z_dja_G235M,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,z_G235M,,DJA redshift from G235M
+z_dja_G235H,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,z_G235H,,DJA redshift from G235H
+z_dja_G395M,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,z_G395M,,DJA redshift from G395M
+z_dja_G395H,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,z_G395H,,DJA redshift from G395H
+z_av,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,z_av,,Mean DJA redshift over gratings
+in_muse,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,in_muse,,Position falls on valid MUSE data
+edge,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,edge,arcsec,"0 if >= 6 arcsec from a MUSE edge, else the distance"
+duplicate,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,duplicate,,"0 = unique, shared nonzero number for a duplicate pair"
+AO_block,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv,AO_block,,Lya at z_av falls in the sodium AO gap
+in_good,sample,/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv,ID,,"In the in-MUSE, non-edge, non-AO, deduplicated subsample"
+z_sys,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,"Systemic z: OIII S/N > 13, then Ha S/N > 13, else none"
+z_sys_err,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,Error on z_sys
+z_sys_snr,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,S/N of the line that set z_sys
+z_sys_line,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,Line that set z_sys
+z_sys_grating,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,Grating of the line that set z_sys
+z_sys_quality,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,"a = [OIII], b = Halpha, d = no z_sys"
+z_dja,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,"DJA z of the z_sys grating, or of the fallback grating if no z_sys (p2_common.fallback_grating)"
+z_best,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,"z_sys, or z_dja where there is no z_sys (what the MUSE steps use)"
+z_best_source,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,(computed),,z_sys or z_dja
+z_OIII,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_OIII,,"OIII redshift, best successful grating"
+z_OIII_err,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_OIII_err,,"OIII error, best successful grating"
+z_OIII_snr,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_OIII_snr,,"OIII S/N, best successful grating"
+z_Ha,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_Ha,,"Ha redshift, best successful grating"
+z_Ha_err,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_Ha_err,,"Ha error, best successful grating"
+z_Ha_snr,zsys,/ceph/cephfs/apatrick/P2/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv,z_Ha_snr,,"Ha S/N, best successful grating"
+lya_peak_snr,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv,peak_snr,,Peak sliding-window Lya S/N in the search band
+lya_snr_centre_air,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv,best_center,AA,Observed (air) wavelength of the peak S/N window
+lya_det_98,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/false_pos_snr_percentiles.csv,pct_98.0,,lya_peak_snr above the 98.0 percentile of the false-positive S/N
+lya_det_99p5,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/false_pos_snr_percentiles.csv,pct_99.5,,lya_peak_snr above the 99.5 percentile of the false-positive S/N
+lya_dx_arcsec,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv,dx_arcsec,arcsec,Optimised aperture offset in x from the JWST position
+lya_dy_arcsec,lya_det,/ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv,dy_arcsec,arcsec,Optimised aperture offset in y from the JWST position
+lya_fit_success,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fit_success,,Skewed-Gaussian Lya fit converged
+lya_quality_flag,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,quality_flag,,1 if the fitter raised no quality issue
+lya_quality_reason,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,quality_reason,,"Fitter quality notes, ';' separated"
+z_lya,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,z_lya,,Lya redshift from the model peak used (peak_used)
+z_lya_err,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,z_lya_err_mc,,MC error on z_lya
+lya_peak_used,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,peak_used,,"Model peak defining z_lya, obs (LSF-convolved) or int"
+lya_peak_wave_vac,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,lya_peak_wave_vac,AA,Observed vacuum wavelength of the Lya peak
+lya_flux,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,flux_fit,MUSE units (1e-20 erg/s/cm2),"Lya flux in the 0.6 arcsec aperture, skewed-Gaussian integral"
+lya_flux_err_fit,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,flux_fit_err,MUSE units (1e-20 erg/s/cm2),Covariance error on lya_flux
+lya_flux_err_mc,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,flux_fit_err_mc,MUSE units (1e-20 erg/s/cm2),MC error on lya_flux
+lya_fwhm_int_kms,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fwhm_int_kms,km/s,Intrinsic (LSF-corrected) Lya FWHM
+lya_fwhm_int_kms_err,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fwhm_int_kms_err_mc,km/s,MC error on the intrinsic FWHM
+lya_fwhm_obs_kms,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fwhm_obs_kms,km/s,Observed (LSF-convolved) Lya FWHM
+lya_fwhm_obs_kms_err,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fwhm_obs_kms_err_mc,km/s,MC error on the observed FWHM
+lya_fwhm_lsf_kms,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,fwhm_lsf_kms,km/s,MUSE LSF FWHM at the line (Bacon+17)
+lya_resolved,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,resolved,,Intrinsic FWHM >= 0.5 LSF and sigma off its floor
+lya_frac_unresolved_mc,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,frac_unresolved_mc,,Fraction of MC draws that were unresolved
+lya_alpha_skew,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,alpha_skew,,Intrinsic skewness parameter
+lya_skew_at_max,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,skew_at_max,,Skewness reached its upper bound
+lya_n_mc_success,lya_fit,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,n_mc_success,,Number of successful MC refits
+lya_flux_cgs,lya_fit,(computed),flux_fit,erg/s/cm2,"lya_flux x 1e-20, 0.6 arcsec aperture, not total"
+lya_flux_cgs_err,lya_fit,(computed),flux_fit_err_mc,erg/s/cm2,MC error (covariance error where MC is missing)
+delta_v_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_kms,km/s,Lya velocity offset c (z_lya - z_sys)/(1 + z_sys)
+delta_v_err_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_err_kms,km/s,"Total Delta_v error, Lya and systemic in quadrature"
+delta_v_err_lya_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_err_lya_kms,km/s,Lya part of the Delta_v error
+delta_v_err_sys_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_err_sys_kms,km/s,Systemic part of the Delta_v error
+delta_v_obs_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_obs_kms,km/s,Delta_v from the LSF-convolved model peak
+delta_v_int_kms,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,delta_v_int_kms,km/s,Delta_v from the intrinsic model peak
+tier,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,(file name),,"Automatic tier, gold to bad"
+n_criteria_failed,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,n_criteria_failed,,Number of the six criteria failed
+pass_zsys_is_OIII,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_zsys_is_OIII,,Passes the zsys_is_OIII criterion
+pass_dv_positive,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_dv_positive,,Passes the dv_positive criterion
+pass_dv_err<120,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_dv_err<120,,Passes the dv_err<120 criterion
+pass_fwhm>lsf,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_fwhm>lsf,,Passes the fwhm>lsf criterion
+pass_snr>3,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_snr>3,,Passes the snr>3 criterion
+pass_not_oob,tier,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_group_<tier>.csv,pass_not_oob,,Passes the not_oob criterion
+manual,labels,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_manual_labels.csv,manual,,"By-eye label a, b, c or d"
+tier_when_labelled,labels,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_manual_labels.csv,tier_when_labelled,,Automatic tier when the label was given
+manual_note,labels,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_manual_labels.csv,note,,Free-text note from the label file
+M_UV,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,M_UV,AB mag,"Absolute UV magnitude at 1500 AA, no dust correction"
+M_UV_err,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,M_UV_err,AB mag,Error on M_UV
+m_UV,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,m_UV,AB mag,Apparent magnitude at rest 1500 AA
+beta,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,beta,,"UV slope, f_lambda propto lambda^beta"
+beta_err,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,beta_err,,Error on beta
+f1500_nJy,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,f1500_nJy,nJy,Power-law flux density at rest 1500 AA
+uv_n_filters,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,n_filters,,Filters used in the power-law fit
+uv_filters_used,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,filters_used,,"Filters used, ';' separated"
+uv_fit_flag,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,fit_flag,,"ok, too_few_filters or fit_failed"
+good_muv,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,good_muv,,Fit ok and M_UV_err < 0.5
+good_beta,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,good_beta,,Fit ok and beta_err < 0.5
+uv_z,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,z,,Redshift used for the UV fit
+uv_z_type,uv,/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv,z_type,,Which redshift the UV fit used
+pm_number,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_number,,PRIMER+MINERVA catalogue Number
+pm_sep_arcsec,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_sep_arcsec,arcsec,Separation of the PRIMER+MINERVA match
+pm_n_within,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_n_within,,Catalogue sources within the match radius
+pm_flag,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_flag,,"PRIMER+MINERVA Flag (0 clean, 1-3 photometry, 4-6 photo-z)"
+pm_flag_phot_bad,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_flag_phot_bad,,"Flag 1, 2 or 3"
+pm_blend,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_blend,,Comparably bright second object within 0.3 arcsec
+pm_jels_outlier,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_jels_outlier,,F356W far from the JELS catalogue value
+pm_ap_diam,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_ap_diam,arcsec,Aperture of the catalogue fluxes
+pm_total_correction,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_total_correction,,Aperture to total flux factor
+pm_z_phot,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_z_phot,,Catalogue photo-z (median of 5 runs)
+pm_logM_lephare,phot,/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_by_JELS_ID.csv,pm_mass_lephare_total,log Msun,"LePhare stellar mass at z_best, corrected to total"
+ha_flux_best,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_flux_best,erg/s/cm2,"Observed [NII]-deblended Halpha flux, best-S/N grating, no corrections"
+ha_flux_best_err,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_flux_best_err,erg/s/cm2,Error on ha_flux_best
+ha_flux_best_snr,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_flux_best_snr,,S/N of ha_flux_best
+ha_flux_best_grating,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_flux_best_grating,,Grating of ha_flux_best
+ha_fwhm_int_kms,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_fwhm_int_best,km/s,Intrinsic Halpha FWHM
+ha_fwhm_int_kms_err,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_fwhm_int_best_err,km/s,Error on the intrinsic Halpha FWHM
+ha_fwhm_obs_kms,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_fwhm_obs_best,km/s,Observed Halpha FWHM
+ha_fwhm_unresolved,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_fwhm_unresolved_best,,"Halpha unresolved, intrinsic FWHM is a limit"
+ha_fwhm_grating,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Ha_summary_by_JELS_ID.csv,Ha_fwhm_best_grating,,Grating of the Halpha FWHM
+hb_flux_best,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Hbeta_summary_by_JELS_ID.csv,Hbeta_flux_best,erg/s/cm2,"Observed Hbeta flux, best-S/N grating, no corrections"
+hb_flux_best_err,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Hbeta_summary_by_JELS_ID.csv,Hbeta_flux_best_err,erg/s/cm2,Error on hb_flux_best
+hb_flux_best_snr,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Hbeta_summary_by_JELS_ID.csv,Hbeta_flux_best_snr,,S/N of hb_flux_best
+hb_flux_best_grating,lines,/ceph/cephfs/apatrick/P2/jwst_catalogs/Hbeta_summary_by_JELS_ID.csv,Hbeta_flux_best_grating,,Grating of hb_flux_best
+ha_corr_grating,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,grating_ha,,Grating the corrected Halpha flux was taken from
+ha_hb_same_grating,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,same_grating,,Halpha and Hbeta from the same spectrum
+ha_slit_reference,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,slit_reference,,Photometry the slit factor corrects to
+ha_flux_uncorr,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_uncorr,erg/s/cm2,Observed Halpha flux fed into the corrections
+ha_flux_uncorr_err,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_uncorr_err,erg/s/cm2,Error on ha_flux_uncorr
+ha_slit_factor,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_slit_factor,,Slit-loss factor applied to Halpha
+ha_slit_source,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_slit_source,,"direct, sample_median or dja"
+ha_flux_slitcorr,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_slitcorr,erg/s/cm2,Slit-loss corrected Halpha flux
+ha_flux_slitcorr_err,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_slitcorr_err,erg/s/cm2,Error on ha_flux_slitcorr
+balmer_ratio,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,balmer_ratio,,Halpha/Hbeta used for the dust correction
+ebv_neb,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ebv_neb,mag,"Nebular E(B-V) from the Balmer decrement, Calzetti+00"
+ebv_neb_err_lo,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ebv_neb_err_lo,mag,Lower error on ebv_neb
+ebv_neb_err_hi,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ebv_neb_err_hi,mag,Upper error on ebv_neb
+A_ha,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,A_ha,mag,Attenuation at Halpha
+ha_flux_fullcorr,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_fullcorr,erg/s/cm2,Slit-loss and dust corrected Halpha flux
+ha_flux_fullcorr_err_lo,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_fullcorr_err_lo,erg/s/cm2,Lower error on ha_flux_fullcorr
+ha_flux_fullcorr_err_hi,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_fullcorr_err_hi,erg/s/cm2,Upper error on ha_flux_fullcorr
+ha_flux_fullcorr_dja,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,ha_flux_fullcorr_dja,erg/s/cm2,Dust corrected Halpha with the DJA path-loss only
+ha_dust_method,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,dust_method,,"balmer, or blank if no dust correction"
+ha_balmer_basis,ha_corr,/ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections.csv,balmer_basis,,observed_same_grating or slitcorr
+sed_logM,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_logM,log Msun,"Stellar mass (BAGPIPES, aperture corrected)"
+sed_logM_err_lo,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_logM_err_lo,dex,Lower error
+sed_logM_err_hi,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_logM_err_hi,dex,Upper error
+sed_sfr10,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_sfr10,Msun/yr,SFR averaged over 10 Myr
+sed_sfr10_err_lo,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_sfr10_err_lo,Msun/yr,Lower error
+sed_sfr10_err_hi,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_sfr10_err_hi,Msun/yr,Upper error
+sed_ssfr10,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_ssfr10,1/yr,"sSFR, SFR10 / M*"
+sed_av,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_av,mag,V-band attenuation from the SED fit
+sed_av_err_lo,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_av_err_lo,mag,Lower error
+sed_av_err_hi,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_av_err_hi,mag,Upper error
+sed_ebv,sed,/ceph/cephfs/apatrick/P2/sed/sed_properties_by_JELS_ID.csv,sed_ebv,mag,E(B-V) = A_V / 4.05
+fesc_lya,fesc,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_fesc_by_JELS_ID.csv,fesc_lya,,"Lya escape fraction, F_Lya / (8.7 F_Halpha,corr)"
+fesc_lya_err_lo,fesc,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_fesc_by_JELS_ID.csv,fesc_lya_err_lo,,Lower error
+fesc_lya_err_hi,fesc,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_fesc_by_JELS_ID.csv,fesc_lya_err_hi,,Upper error
+fesc_lya_is_limit,fesc,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_fesc_by_JELS_ID.csv,fesc_lya_is_limit,,True if fesc_lya is a 5 sigma upper limit
+fesc_ha_dust,fesc,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_fesc_by_JELS_ID.csv,fesc_ha_dust,,"Dust correction behind the Halpha flux, balmer or sed"
+zsys_muse,provenance,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,z_sys / z_sys_source,,"z used for the MUSE contsub, extraction and Lya fit"
+zsys_muse_source,provenance,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,z_sys / z_sys_source,,"z_sys or z_dja, as recorded by the Lya fitter"
+zsys_mismatch_kms,provenance,/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv,z_sys / z_sys_source,km/s,zsys_muse relative to z_best
+z_sys_dv,delta_v,/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv,z_sys,,z_sys used in delta_v_from_best_zsys_line.csv

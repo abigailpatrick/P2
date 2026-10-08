@@ -1,0 +1,588 @@
+column,unit,format,description
+file,,,DJA filename
+srcid,,,Source ID from APT plan
+ra,deg,.8f,RA from APT plan
+dec,deg,.8f,Dec from APT plan
+grating,,,NIRSpec grating
+filter,,,Blocking filter
+effexptm,,,Effective exposure time of each exposure
+nfiles,,,Number of files combined in final spectrum
+dataset,,,Filename of first exposure
+msamet,,,MSA metadata file
+msaid,,,MSA metadata ID
+msacnf,,,MSA metadata config
+dithn,,,Dither number
+slitid,,,MSA plan slit ID
+root,,,DJA program + mask rootname
+npix,,,Number of pixels in the 2D spectrum
+ndet,,,Number of detectors contributing to output
+wmin,micron,,Minimum wavelength of the combined spectrum
+wmax,micron,,Maximum wavelength of the combined spectrum
+wmaxsn,micron,,Wavelength of maximum signal to noise
+sn10,,,10th percentile SN
+flux10,,,Flux at sn10
+err10,,,Uncertainty at sn50
+sn50,,,50th percentile SN
+flux50,,,Flux at sn50
+err50,,,Uncertainty at sn90
+sn90,,,90th percentile SN
+flux90,,,Flux at sn90
+err90,,,Uncertainty at sn90
+xstart,,,Starting detector x coordinate of 2D cutout
+ystart,,,Starting detector y coordinate of 2D cutout
+xsize,,,x size of 2D cutout
+ysize,,,y size of 2D cutout
+slit_pa,,,Estimated PA of the slitlet
+pa_v3,,,Estimated PA of the spacecraft V3 axis
+srcypix,,,Location of the source in the 2D spectrum
+profcen,,,Profile offset relative to the expected center
+profsig,,,Derived profile width in pixels added to PSF
+ctime,,,UNIX time when file was generated
+version,,,MSAEXP code version
+exptime,,,Estimated total exposure time
+contchi2,,,Chi2 of the spline continuum fit
+dof,,,Total number of pixels in the redshift + line fit
+fullchi2,,,Chi2 of the full continuum + line fit
+line_ariii_7138,,,Line flux of ariii_7138 1e-20 erg/s/cm2
+line_ariii_7138_err,,,
+line_ariii_7753,,,Line flux of ariii_7753 1e-20 erg/s/cm2
+line_ariii_7753_err,,,
+line_bra,,,Line flux of bra 1e-20 erg/s/cm2
+line_bra_err,,,
+line_brb,,,Line flux of brb 1e-20 erg/s/cm2
+line_brb_err,,,
+line_brd,,,Line flux of brd 1e-20 erg/s/cm2
+line_brd_err,,,
+line_brg,,,Line flux of brg 1e-20 erg/s/cm2
+line_brg_err,,,
+line_hb,,,Line flux of hb 1e-20 erg/s/cm2
+line_hb_err,,,
+line_hd,,,Line flux of hd 1e-20 erg/s/cm2
+line_hd_err,,,
+line_hei_1083,,,Line flux of hei_1083 1e-20 erg/s/cm2
+line_hei_1083_err,,,
+line_hei_3889,,,Line flux of hei_3889 1e-20 erg/s/cm2
+line_hei_3889_err,,,
+line_hei_5877,,,Line flux of hei_5877 1e-20 erg/s/cm2
+line_hei_5877_err,,,
+line_hei_7065,,,Line flux of hei_7065 1e-20 erg/s/cm2
+line_hei_7065_err,,,
+line_hei_8446,,,Line flux of hei_8446 1e-20 erg/s/cm2
+line_hei_8446_err,,,
+line_heii_4687,,,Line flux of heii_4687 1e-20 erg/s/cm2
+line_heii_4687_err,,,
+line_hg,,,Line flux of hg 1e-20 erg/s/cm2
+line_hg_err,,,
+line_lya,,,Line flux of lya 1e-20 erg/s/cm2
+line_lya_err,,,
+line_mgii,,,Line flux of mgii 1e-20 erg/s/cm2
+line_mgii_err,,,
+line_neiii_3867,,,Line flux of neiii_3867 1e-20 erg/s/cm2
+line_neiii_3867_err,,,
+line_neiii_3968,,,Line flux of neiii_3968 1e-20 erg/s/cm2
+line_neiii_3968_err,,,
+line_nev_3346,,,Line flux of nev_3346 1e-20 erg/s/cm2
+line_nev_3346_err,,,
+line_nevi_3426,,,Line flux of nevi_3426 1e-20 erg/s/cm2
+line_nevi_3426_err,,,
+line_niii_1750,,,Line flux of niii_1750 1e-20 erg/s/cm2
+line_niii_1750_err,,,
+line_oi_6302,,,Line flux of oi_6302 1e-20 erg/s/cm2
+line_oi_6302_err,,,
+line_oii,,,Line flux of oii 1e-20 erg/s/cm2
+line_oii_7325,,,Line flux of oii_7325 1e-20 erg/s/cm2
+line_oii_7325_err,,,
+line_oii_err,,,
+line_oiii,,,Line flux of combined OIII 4959+5007 1e-20 erg/s/cm2/A
+line_oiii_1663,,,Line flux of oiii_1663 1e-20 erg/s/cm2
+line_oiii_1663_err,,,
+line_oiii_4363,,,Line flux of oiii_4363 1e-20 erg/s/cm2
+line_oiii_4363_err,,,
+line_oiii_4959,,,Line flux of oiii_4959 1e-20 erg/s/cm2
+line_oiii_4959_err,,,
+line_oiii_5007,,,Line flux of oiii_5007 1e-20 erg/s/cm2
+line_oiii_5007_err,,,
+line_oiii_err,,,
+line_pa10,,,Line flux of pa10 1e-20 erg/s/cm2
+line_pa10_err,,,
+line_pa8,,,Line flux of pa8 1e-20 erg/s/cm2
+line_pa8_err,,,
+line_pa9,,,Line flux of pa9 1e-20 erg/s/cm2
+line_pa9_err,,,
+line_paa,,,Line flux of paa 1e-20 erg/s/cm2
+line_paa_err,,,
+line_pab,,,Line flux of pab 1e-20 erg/s/cm2
+line_pab_err,,,
+line_pad,,,Line flux of pad 1e-20 erg/s/cm2
+line_pad_err,,,
+line_pag,,,Line flux of pag 1e-20 erg/s/cm2
+line_pag_err,,,
+line_pfb,,,Line flux of pfb 1e-20 erg/s/cm2
+line_pfb_err,,,
+line_pfd,,,Line flux of pfd 1e-20 erg/s/cm2
+line_pfd_err,,,
+line_pfe,,,Line flux of pfe 1e-20 erg/s/cm2
+line_pfe_err,,,
+line_pfg,,,Line flux of pfg 1e-20 erg/s/cm2
+line_pfg_err,,,
+line_sii,,,Line flux of sii 1e-20 erg/s/cm2
+line_sii_err,,,
+line_siii_9068,,,Line flux of siii_9068 1e-20 erg/s/cm2
+line_siii_9068_err,,,
+line_siii_9531,,,Line flux of siii_9531 1e-20 erg/s/cm2
+line_siii_9531_err,,,
+spl_0,,,Spline continuum coefficient 0
+spl_0_err,,,
+spl_1,,,Spline continuum coefficient 1
+spl_10,,,Spline continuum coefficient 10
+spl_10_err,,,
+spl_11,,,Spline continuum coefficient 11
+spl_11_err,,,
+spl_12,,,Spline continuum coefficient 12
+spl_12_err,,,
+spl_13,,,Spline continuum coefficient 13
+spl_13_err,,,
+spl_14,,,Spline continuum coefficient 14
+spl_14_err,,,
+spl_15,,,Spline continuum coefficient 15
+spl_15_err,,,
+spl_16,,,Spline continuum coefficient 16
+spl_16_err,,,
+spl_17,,,Spline continuum coefficient 17
+spl_17_err,,,
+spl_18,,,Spline continuum coefficient 18
+spl_18_err,,,
+spl_19,,,Spline continuum coefficient 19
+spl_19_err,,,
+spl_1_err,,,
+spl_2,,,Spline continuum coefficient 2
+spl_20,,,Spline continuum coefficient 20
+spl_20_err,,,
+spl_21,,,Spline continuum coefficient 21
+spl_21_err,,,
+spl_22,,,Spline continuum coefficient 22
+spl_22_err,,,
+spl_2_err,,,
+spl_3,,,Spline continuum coefficient 3
+spl_3_err,,,
+spl_4,,,Spline continuum coefficient 4
+spl_4_err,,,
+spl_5,,,Spline continuum coefficient 5
+spl_5_err,,,
+spl_6,,,Spline continuum coefficient 6
+spl_6_err,,,
+spl_7,,,Spline continuum coefficient 7
+spl_7_err,,,
+spl_8,,,Spline continuum coefficient 8
+spl_8_err,,,
+spl_9,,,Spline continuum coefficient 9
+spl_9_err,,,
+zline,,,Redshift where the lines where fit
+line_civ_1549,,,Line flux of civ_1549 1e-20 erg/s/cm2
+line_civ_1549_err,,,
+line_h10,,,Line flux of h10 1e-20 erg/s/cm2
+line_h10_err,,,
+line_h11,,,Line flux of h11 1e-20 erg/s/cm2
+line_h11_err,,,
+line_h12,,,Line flux of h12 1e-20 erg/s/cm2
+line_h12_err,,,
+line_h7,,,Line flux of h7 1e-20 erg/s/cm2
+line_h7_err,,,
+line_h8,,,Line flux of h8 1e-20 erg/s/cm2
+line_h8_err,,,
+line_h9,,,Line flux of h9 1e-20 erg/s/cm2
+line_h9_err,,,
+line_ha,,,Line flux of ha 1e-20 erg/s/cm2
+line_ha_err,,,
+line_hei_6680,,,Line flux of hei_6680 1e-20 erg/s/cm2
+line_hei_6680_err,,,
+line_heii_1640,,,Line flux of heii_1640 1e-20 erg/s/cm2
+line_heii_1640_err,,,
+line_nii_6549,,,Line flux of nii_6549 1e-20 erg/s/cm2
+line_nii_6549_err,,,
+line_nii_6584,,,Line flux of nii_6584 1e-20 erg/s/cm2
+line_nii_6584_err,,,
+line_oii_7323,,,Line flux of oii_7323 1e-20 erg/s/cm2
+line_oii_7323_err,,,
+line_oii_7332,,,Line flux of oii_7332 1e-20 erg/s/cm2
+line_oii_7332_err,,,
+line_sii_6717,,,Line flux of sii_6717 1e-20 erg/s/cm2
+line_sii_6717_err,,,
+line_sii_6731,,,Line flux of sii_6731 1e-20 erg/s/cm2
+line_sii_6731_err,,,
+line_siii_6314,,,Line flux of siii_6314 1e-20 erg/s/cm2
+line_siii_6314_err,,,
+escale0,,,0th coefficient of the uncertainty scaling
+escale1,,,1st coefficient of the uncertainty scaling
+line_ciii_1906,,,Line flux of ciii_1906 1e-20 erg/s/cm2
+line_ciii_1906_err,,,
+line_niv_1487,,,Line flux of niv_1487 1e-20 erg/s/cm2
+line_niv_1487_err,,,
+line_pah_3p29,,,Line flux of pah_3p29 1e-20 erg/s/cm2
+line_pah_3p29_err,,,
+line_pah_3p40,,,Line flux of pah_3p40 1e-20 erg/s/cm2
+line_pah_3p40_err,,,
+eqw_ariii_7138,,,Observed-frame equivalent width in ariii_7138
+eqw_ariii_7753,,,Observed-frame equivalent width in ariii_7753
+eqw_bra,,,Observed-frame equivalent width in bra
+eqw_brb,,,Observed-frame equivalent width in brb
+eqw_brd,,,Observed-frame equivalent width in brd
+eqw_brg,,,Observed-frame equivalent width in brg
+eqw_ciii_1906,,,Observed-frame equivalent width in ciii_1906
+eqw_civ_1549,,,Observed-frame equivalent width in civ_1549
+eqw_ha_nii,,,Observed-frame equivalent width in ha_nii
+eqw_hb,,,Observed-frame equivalent width in hb
+eqw_hd,,,Observed-frame equivalent width in hd
+eqw_hei_1083,,,Observed-frame equivalent width in hei_1083
+eqw_hei_3889,,,Observed-frame equivalent width in hei_3889
+eqw_hei_5877,,,Observed-frame equivalent width in hei_5877
+eqw_hei_7065,,,Observed-frame equivalent width in hei_7065
+eqw_hei_8446,,,Observed-frame equivalent width in hei_8446
+eqw_heii_1640,,,Observed-frame equivalent width in heii_1640
+eqw_heii_4687,,,Observed-frame equivalent width in heii_4687
+eqw_hg,,,Observed-frame equivalent width in hg
+eqw_lya,,,Observed-frame equivalent width in lya
+eqw_mgii,,,Observed-frame equivalent width in mgii
+eqw_neiii_3867,,,Observed-frame equivalent width in neiii_3867
+eqw_neiii_3968,,,Observed-frame equivalent width in neiii_3968
+eqw_nev_3346,,,Observed-frame equivalent width in nev_3346
+eqw_nevi_3426,,,Observed-frame equivalent width in nevi_3426
+eqw_niii_1750,,,Observed-frame equivalent width in niii_1750
+eqw_niv_1487,,,Observed-frame equivalent width in niv_1487
+eqw_oi_6302,,,Observed-frame equivalent width in oi_6302
+eqw_oii,,,Observed-frame equivalent width in oii
+eqw_oii_7325,,,Observed-frame equivalent width in oii_7325
+eqw_oiii,,,Observed-frame equivalent width in oiii
+eqw_oiii_1663,,,Observed-frame equivalent width in oiii_1663
+eqw_oiii_4363,,,Observed-frame equivalent width in oiii_4363
+eqw_oiii_4959,,,Observed-frame equivalent width in oiii_4959
+eqw_oiii_5007,,,Observed-frame equivalent width in oiii_5007
+eqw_pa10,,,Observed-frame equivalent width in pa10
+eqw_pa8,,,Observed-frame equivalent width in pa8
+eqw_pa9,,,Observed-frame equivalent width in pa9
+eqw_paa,,,Observed-frame equivalent width in paa
+eqw_pab,,,Observed-frame equivalent width in pab
+eqw_pad,,,Observed-frame equivalent width in pad
+eqw_pag,,,Observed-frame equivalent width in pag
+eqw_pfb,,,Observed-frame equivalent width in pfb
+eqw_pfd,,,Observed-frame equivalent width in pfd
+eqw_pfe,,,Observed-frame equivalent width in pfe
+eqw_pfg,,,Observed-frame equivalent width in pfg
+eqw_sii,,,Observed-frame equivalent width in sii
+eqw_siii_9068,,,Observed-frame equivalent width in siii_9068
+eqw_siii_9531,,,Observed-frame equivalent width in siii_9531
+line_ha_nii,,,Line flux of combined Ha+NII with 3:1 ratio
+line_ha_nii_err,,,
+eqw_h10,,,Observed-frame equivalent width in h10
+eqw_h11,,,Observed-frame equivalent width in h11
+eqw_h12,,,Observed-frame equivalent width in h12
+eqw_h7,,,Observed-frame equivalent width in h7
+eqw_h8,,,Observed-frame equivalent width in h8
+eqw_h9,,,Observed-frame equivalent width in h9
+eqw_ha,,,Observed-frame equivalent width in ha
+eqw_hei_6680,,,Observed-frame equivalent width in hei_6680
+eqw_nii_6549,,,Observed-frame equivalent width in nii_6549
+eqw_nii_6584,,,Observed-frame equivalent width in nii_6584
+eqw_oii_7323,,,Observed-frame equivalent width in oii_7323
+eqw_oii_7332,,,Observed-frame equivalent width in oii_7332
+eqw_sii_6717,,,Observed-frame equivalent width in sii_6717
+eqw_sii_6731,,,Observed-frame equivalent width in sii_6731
+eqw_siii_6314,,,Observed-frame equivalent width in siii_6314
+sn_line,,.1f,Maximum emission line SN
+ztime,,,UNIX time of redshift fit
+line_ci_9850,,,Line flux of ci_9850 1e-20 erg/s/cm2
+line_ci_9850_err,,,
+line_feii_11128,,,Line flux of feii_11128 1e-20 erg/s/cm2
+line_feii_11128_err,,,
+line_pii_11886,,,Line flux of pii_11886 1e-20 erg/s/cm2
+line_pii_11886_err,,,
+line_feii_12570,,,Line flux of feii_12570 1e-20 erg/s/cm2
+line_feii_12570_err,,,
+eqw_ci_9850,,,Observed-frame equivalent width in ci_9850
+eqw_feii_11128,,,Observed-frame equivalent width in feii_11128
+eqw_pii_11886,,,Observed-frame equivalent width in pii_11886
+eqw_feii_12570,,,Observed-frame equivalent width in feii_12570
+line_feii_16440,,,Line flux of feii_16440 1e-20 erg/s/cm2
+line_feii_16440_err,,,
+line_feii_16877,,,Line flux of feii_16877 1e-20 erg/s/cm2
+line_feii_16877_err,,,
+line_brf,,,Line flux of brf 1e-20 erg/s/cm2
+line_brf_err,,,
+line_feii_17418,,,Line flux of feii_17418 1e-20 erg/s/cm2
+line_feii_17418_err,,,
+line_bre,,,Line flux of bre 1e-20 erg/s/cm2
+line_bre_err,,,
+line_feii_18362,,,Line flux of feii_18362 1e-20 erg/s/cm2
+line_feii_18362_err,,,
+eqw_feii_16440,,,Observed-frame equivalent width in feii_16440
+eqw_feii_16877,,,Observed-frame equivalent width in feii_16877
+eqw_brf,,,Observed-frame equivalent width in brf
+eqw_feii_17418,,,Observed-frame equivalent width in feii_17418
+eqw_bre,,,Observed-frame equivalent width in bre
+eqw_feii_18362,,,Observed-frame equivalent width in feii_18362
+valid,,,Redshift matches best z from visual inspection
+objid,,,Unique source identifier
+z_best,,,Best redshift estimate for unique sources
+ztype,,,Source for z_best (G)rating or (P)rism
+z_prism,,,Best redshift estimate from prism spectra
+z_grating,,,Best redshift estiamte from grating spectra
+phot_correction,,.2f,Scale to photometry -log10(c) = -0.902 log10(flux_radius) + 0.649 log10(profsig) + 0.605
+phot_flux_radius,,.2f,FLUX_RADIUS from photometric source
+phot_dr,,,Offset to the nearest source in the photometric catalog in arcsec
+file_phot,,,Filename of the photometric catalog
+id_phot,,,ID number in the photometric cadtalog
+phot_mag_auto,,.2f,Kron MAG_AUTO in the photometric detection image
+phot_f090w_tot_1,,,Total f090w flux density from the photometric catalog
+phot_f090w_etot_1,,,
+phot_f115w_tot_1,,,Total f115w flux density from the photometric catalog
+phot_f115w_etot_1,,,
+phot_f150w_tot_1,,,Total f150w flux density from the photometric catalog
+phot_f150w_etot_1,,,
+phot_f200w_tot_1,,,Total f200w flux density from the photometric catalog
+phot_f200w_etot_1,,,
+phot_f277w_tot_1,,,Total f277w flux density from the photometric catalog
+phot_f277w_etot_1,,,
+phot_f356w_tot_1,,,Total f356w flux density from the photometric catalog
+phot_f356w_etot_1,,,
+phot_f410m_tot_1,,,Total f410m flux density from the photometric catalog
+phot_f410m_etot_1,,,
+phot_f444w_tot_1,,,Total f444w flux density from the photometric catalog
+phot_f444w_etot_1,,,
+phot_Av,,,Av from the photoz fit
+phot_mass,,,stellar mass from the photoz fit
+phot_restU,,,flux density of the redshifted U band from the photoz fit
+phot_restV,,,flux density of the redshifted V band from the photoz fit
+phot_restJ,,,flux density of the redshifted J band from the photoz fit
+z_phot,,,photometric redshift
+phot_LHa,,,Halpha luminosity from the photo-z fit
+phot_LOIII,,,OIII luminosity from the photo-z fit
+phot_LOII,,,OII luminosity from the photo-z fit
+grade,,,Grade from visual inspection
+zgrade,,9.5f,Redshift from visual inspection
+reviewer,,,Initials of the visual inspection reviewer
+comment,,,Comment from visual inspection
+zrf,,,Redshift used for integrated rest-frame filter
+escale,,,
+obs_239_valid,,,
+obs_239_frac,,,Fraction of wfc_f814w_t81.dat covered by spectrum
+obs_239_flux,,,Spectrum flux in wfc_f814w_t81.dat
+obs_239_err,,,Spectrum err in wfc_f814w_t81.dat
+obs_239_full_err,,,Spectrum err in wfc_f814w_t81.dat
+obs_205_valid,,,
+obs_205_frac,,,Fraction of f160w.dat covered by spectrum
+obs_205_flux,,,Spectrum flux in f160w.dat
+obs_205_err,,,Spectrum err in f160w.dat
+obs_205_full_err,,,Spectrum err in f160w.dat
+obs_362_valid,,,
+obs_362_frac,,,Fraction of jwst_nircam_f070w covered by spectrum
+obs_362_flux,,,Spectrum flux in jwst_nircam_f070w
+obs_362_err,,,Spectrum err in jwst_nircam_f070w
+obs_362_full_err,,,Spectrum err in jwst_nircam_f070w
+obs_363_valid,,,
+obs_363_frac,,,Fraction of jwst_nircam_f090w covered by spectrum
+obs_363_flux,,,Spectrum flux in jwst_nircam_f090w
+obs_363_err,,,Spectrum err in jwst_nircam_f090w
+obs_363_full_err,,,Spectrum err in jwst_nircam_f090w
+obs_364_valid,,,
+obs_364_frac,,,Fraction of jwst_nircam_f115w covered by spectrum
+obs_364_flux,,,Spectrum flux in jwst_nircam_f115w
+obs_364_err,,,Spectrum err in jwst_nircam_f115w
+obs_364_full_err,,,Spectrum err in jwst_nircam_f115w
+obs_365_valid,,,
+obs_365_frac,,,Fraction of jwst_nircam_f150w covered by spectrum
+obs_365_flux,,,Spectrum flux in jwst_nircam_f150w
+obs_365_err,,,Spectrum err in jwst_nircam_f150w
+obs_365_full_err,,,Spectrum err in jwst_nircam_f150w
+obs_366_valid,,,
+obs_366_frac,,,Fraction of jwst_nircam_f200w covered by spectrum
+obs_366_flux,,,Spectrum flux in jwst_nircam_f200w
+obs_366_err,,,Spectrum err in jwst_nircam_f200w
+obs_366_full_err,,,Spectrum err in jwst_nircam_f200w
+obs_370_valid,,,
+obs_370_frac,,,Fraction of jwst_nircam_f182m covered by spectrum
+obs_370_flux,,,Spectrum flux in jwst_nircam_f182m
+obs_370_err,,,Spectrum err in jwst_nircam_f182m
+obs_370_full_err,,,Spectrum err in jwst_nircam_f182m
+obs_371_valid,,,
+obs_371_frac,,,Fraction of jwst_nircam_f210m covered by spectrum
+obs_371_flux,,,Spectrum flux in jwst_nircam_f210m
+obs_371_err,,,Spectrum err in jwst_nircam_f210m
+obs_371_full_err,,,Spectrum err in jwst_nircam_f210m
+obs_375_valid,,,
+obs_375_frac,,,Fraction of jwst_nircam_f277w covered by spectrum
+obs_375_flux,,,Spectrum flux in jwst_nircam_f277w
+obs_375_err,,,Spectrum err in jwst_nircam_f277w
+obs_375_full_err,,,Spectrum err in jwst_nircam_f277w
+obs_376_valid,,,
+obs_376_frac,,,Fraction of jwst_nircam_f356w covered by spectrum
+obs_376_flux,,,Spectrum flux in jwst_nircam_f356w
+obs_376_err,,,Spectrum err in jwst_nircam_f356w
+obs_376_full_err,,,Spectrum err in jwst_nircam_f356w
+obs_377_valid,,,
+obs_377_frac,,,Fraction of jwst_nircam_f444w covered by spectrum
+obs_377_flux,,,Spectrum flux in jwst_nircam_f444w
+obs_377_err,,,Spectrum err in jwst_nircam_f444w
+obs_377_full_err,,,Spectrum err in jwst_nircam_f444w
+obs_379_valid,,,
+obs_379_frac,,,Fraction of jwst_nircam_f250m covered by spectrum
+obs_379_flux,,,Spectrum flux in jwst_nircam_f250m
+obs_379_err,,,Spectrum err in jwst_nircam_f250m
+obs_379_full_err,,,Spectrum err in jwst_nircam_f250m
+obs_380_valid,,,
+obs_380_frac,,,Fraction of jwst_nircam_f300m covered by spectrum
+obs_380_flux,,,Spectrum flux in jwst_nircam_f300m
+obs_380_err,,,Spectrum err in jwst_nircam_f300m
+obs_380_full_err,,,Spectrum err in jwst_nircam_f300m
+obs_381_valid,,,
+obs_381_frac,,,Fraction of jwst_nircam_f335m covered by spectrum
+obs_381_flux,,,Spectrum flux in jwst_nircam_f335m
+obs_381_err,,,Spectrum err in jwst_nircam_f335m
+obs_381_full_err,,,Spectrum err in jwst_nircam_f335m
+obs_382_valid,,,
+obs_382_frac,,,Fraction of jwst_nircam_f360m covered by spectrum
+obs_382_flux,,,Spectrum flux in jwst_nircam_f360m
+obs_382_err,,,Spectrum err in jwst_nircam_f360m
+obs_382_full_err,,,Spectrum err in jwst_nircam_f360m
+obs_383_valid,,,
+obs_383_frac,,,Fraction of jwst_nircam_f410m covered by spectrum
+obs_383_flux,,,Spectrum flux in jwst_nircam_f410m
+obs_383_err,,,Spectrum err in jwst_nircam_f410m
+obs_383_full_err,,,Spectrum err in jwst_nircam_f410m
+obs_384_valid,,,
+obs_384_frac,,,Fraction of jwst_nircam_f430m covered by spectrum
+obs_384_flux,,,Spectrum flux in jwst_nircam_f430m
+obs_384_err,,,Spectrum err in jwst_nircam_f430m
+obs_384_full_err,,,Spectrum err in jwst_nircam_f430m
+obs_385_valid,,,
+obs_385_frac,,,Fraction of jwst_nircam_f460m covered by spectrum
+obs_385_flux,,,Spectrum flux in jwst_nircam_f460m
+obs_385_err,,,Spectrum err in jwst_nircam_f460m
+obs_385_full_err,,,Spectrum err in jwst_nircam_f460m
+obs_386_valid,,,
+obs_386_frac,,,Fraction of jwst_nircam_f480m covered by spectrum
+obs_386_flux,,,Spectrum flux in jwst_nircam_f480m
+obs_386_err,,,Spectrum err in jwst_nircam_f480m
+obs_386_full_err,,,Spectrum err in jwst_nircam_f480m
+rest_120_valid,,,
+rest_120_frac,,,Fraction of galex1500.res covered by spectrum
+rest_120_flux,,,Spectrum flux in galex1500.res
+rest_120_err,,,Spectrum err in galex1500.res
+rest_120_full_err,,,Spectrum err in galex1500.res
+rest_121_valid,,,
+rest_121_frac,,,Fraction of galex2500.res covered by spectrum
+rest_121_flux,,,Spectrum flux in galex2500.res
+rest_121_err,,,Spectrum err in galex2500.res
+rest_121_full_err,,,Spectrum err in galex2500.res
+rest_218_valid,,,
+rest_218_frac,,,Fraction of UV1600.dat covered by spectrum
+rest_218_flux,,,Spectrum flux in UV1600.dat
+rest_218_err,,,Spectrum err in UV1600.dat
+rest_218_full_err,,,Spectrum err in UV1600.dat
+rest_219_valid,,,
+rest_219_frac,,,Fraction of UV2800.dat covered by spectrum
+rest_219_flux,,,Spectrum flux in UV2800.dat
+rest_219_err,,,Spectrum err in UV2800.dat
+rest_219_full_err,,,Spectrum err in UV2800.dat
+rest_270_valid,,,
+rest_270_frac,,,Fraction of Tophat_1400_200.dat covered by spectrum
+rest_270_flux,,,Spectrum flux in Tophat_1400_200.dat
+rest_270_err,,,Spectrum err in Tophat_1400_200.dat
+rest_270_full_err,,,Spectrum err in Tophat_1400_200.dat
+rest_271_valid,,,
+rest_271_frac,,,Fraction of Tophat_1700_200.dat covered by spectrum
+rest_271_flux,,,Spectrum flux in Tophat_1700_200.dat
+rest_271_err,,,Spectrum err in Tophat_1700_200.dat
+rest_271_full_err,,,Spectrum err in Tophat_1700_200.dat
+rest_272_valid,,,
+rest_272_frac,,,Fraction of Tophat_2200_200.dat covered by spectrum
+rest_272_flux,,,Spectrum flux in Tophat_2200_200.dat
+rest_272_err,,,Spectrum err in Tophat_2200_200.dat
+rest_272_full_err,,,Spectrum err in Tophat_2200_200.dat
+rest_274_valid,,,
+rest_274_frac,,,Fraction of Tophat_2800_200.dat covered by spectrum
+rest_274_flux,,,Spectrum flux in Tophat_2800_200.dat
+rest_274_err,,,Spectrum err in Tophat_2800_200.dat
+rest_274_full_err,,,Spectrum err in Tophat_2800_200.dat
+rest_153_valid,,,
+rest_153_frac,,,Fraction of maiz-apellaniz_Johnson_U.res covered by spectrum
+rest_153_flux,,,Spectrum flux in maiz-apellaniz_Johnson_U.res
+rest_153_err,,,Spectrum err in maiz-apellaniz_Johnson_U.res
+rest_153_full_err,,,Spectrum err in maiz-apellaniz_Johnson_U.res
+rest_154_valid,,,
+rest_154_frac,,,Fraction of maiz-apellaniz_Johnson_B.res covered by spectrum
+rest_154_flux,,,Spectrum flux in maiz-apellaniz_Johnson_B.res
+rest_154_err,,,Spectrum err in maiz-apellaniz_Johnson_B.res
+rest_154_full_err,,,Spectrum err in maiz-apellaniz_Johnson_B.res
+rest_155_valid,,,
+rest_155_frac,,,Fraction of maiz-apellaniz_Johnson_V.res covered by spectrum
+rest_155_flux,,,Spectrum flux in maiz-apellaniz_Johnson_V.res
+rest_155_err,,,Spectrum err in maiz-apellaniz_Johnson_V.res
+rest_155_full_err,,,Spectrum err in maiz-apellaniz_Johnson_V.res
+rest_156_valid,,,
+rest_156_frac,,,Fraction of u.dat covered by spectrum
+rest_156_flux,,,Spectrum flux in u.dat
+rest_156_err,,,Spectrum err in u.dat
+rest_156_full_err,,,Spectrum err in u.dat
+rest_157_valid,,,
+rest_157_frac,,,Fraction of g.dat covered by spectrum
+rest_157_flux,,,Spectrum flux in g.dat
+rest_157_err,,,Spectrum err in g.dat
+rest_157_full_err,,,Spectrum err in g.dat
+rest_158_valid,,,
+rest_158_frac,,,Fraction of r.dat covered by spectrum
+rest_158_flux,,,Spectrum flux in r.dat
+rest_158_err,,,Spectrum err in r.dat
+rest_158_full_err,,,Spectrum err in r.dat
+rest_159_valid,,,
+rest_159_frac,,,Fraction of i.dat covered by spectrum
+rest_159_flux,,,Spectrum flux in i.dat
+rest_159_err,,,Spectrum err in i.dat
+rest_159_full_err,,,Spectrum err in i.dat
+rest_160_valid,,,
+rest_160_frac,,,Fraction of z.dat covered by spectrum
+rest_160_flux,,,Spectrum flux in z.dat
+rest_160_err,,,Spectrum err in z.dat
+rest_160_full_err,,,Spectrum err in z.dat
+rest_161_valid,,,
+rest_161_frac,,,Fraction of J.res covered by spectrum
+rest_161_flux,,,Spectrum flux in J.res
+rest_161_err,,,Spectrum err in J.res
+rest_161_full_err,,,Spectrum err in J.res
+rest_162_valid,,,
+rest_162_frac,,,Fraction of H.res covered by spectrum
+rest_162_flux,,,Spectrum flux in H.res
+rest_162_err,,,Spectrum err in H.res
+rest_162_full_err,,,Spectrum err in H.res
+rest_163_valid,,,
+rest_163_frac,,,Fraction of K.res covered by spectrum
+rest_163_flux,,,Spectrum flux in K.res
+rest_163_err,,,Spectrum err in K.res
+rest_163_full_err,,,Spectrum err in K.res
+rest_414_valid,,,
+rest_414_frac,,,Fraction of synthetic_u covered by spectrum
+rest_414_flux,,,Spectrum flux in synthetic_u
+rest_414_err,,,Spectrum err in synthetic_u
+rest_414_full_err,,,Spectrum err in synthetic_u
+rest_415_valid,,,
+rest_415_frac,,,Fraction of synthetic_g covered by spectrum
+rest_415_flux,,,Spectrum flux in synthetic_g
+rest_415_err,,,Spectrum err in synthetic_g
+rest_415_full_err,,,Spectrum err in synthetic_g
+rest_416_valid,,,
+rest_416_frac,,,Fraction of synthetic_i covered by spectrum
+rest_416_flux,,,Spectrum flux in synthetic_i
+rest_416_err,,,Spectrum err in synthetic_i
+rest_416_full_err,,,Spectrum err in synthetic_i
+beta,,,Estimated UV slope beta
+beta_ref_flux,,,
+beta_npix,,,Number of pixels for beta fit
+beta_wlo,,,Minimum wavelength used for beta fit
+beta_whi,,,Maximum wavelength used for beta fit
+beta_nmad,,,NMAD of the beta fit
+dla_npix,,,Number of pixels for the DLA fit
+dla_value,,,DLA parameter from Heintz et al.
+dla_unc,,,Uncertainty on DLA parameter
+beta_cov_00,,,Components of the beta covariance matrix
+beta_cov_01,,,Components of the beta covariance matrix
+beta_cov_10,,,Components of the beta covariance matrix
+beta_cov_11,,,Components of the beta covariance matrix
