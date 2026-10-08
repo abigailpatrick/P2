@@ -34,6 +34,10 @@ Outputs
       the rows of primer_minerva_in_muse.csv with a z_sys, plus
       z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating, and
       dv_sys_dja_kms, the DJA redshift of the z_sys grating relative to z_sys
+  jwst_catalogs/primer_minerva_full_in_muse_with_grating_zsys.csv
+      the same sources, with every column of Isaac's catalogue exactly as
+      delivered (Number, RA, Dec, all bands, -99 kept) plus only z_sys,
+      z_sys_err and z_sys_grating
 
 Usage
 -----
@@ -63,6 +67,8 @@ def parse_args():
     p.add_argument("--lime-dir", default=CAT_DIR, help="folder of lime_<line>_summary.csv")
     p.add_argument("--out-systemic", default=f"{CAT_DIR}/systemic_redshifts.csv")
     p.add_argument("--out-zsys", default=f"{CAT_DIR}/primer_minerva_in_muse_zsys.csv")
+    p.add_argument("--isaac", default=f"{CAT_DIR}/cosmos_primer_minerva_production.fits")
+    p.add_argument("--out-full", default=f"{CAT_DIR}/primer_minerva_full_in_muse_with_grating_zsys.csv")
     p.add_argument("--oiii-snr-min", type=float, default=pc.SNR_MIN["OIII"])
     p.add_argument("--ha-snr-min", type=float, default=pc.SNR_MIN["Ha"])
     p.add_argument("--dry-run", action="store_true")
@@ -155,9 +161,26 @@ def main():
         return
     sysz.to_csv(a.out_systemic, index=False)
     zsys.to_csv(a.out_zsys, index=False)
+
+    # Isaac's catalogue as delivered, every column unchanged, for the z_sys
+    # sources only, plus z_sys, z_sys_err and z_sys_grating.
+    from astropy.table import Table
+    print(f"\nReading Isaac catalogue  {os.path.abspath(a.isaac)}")
+    isaac = Table.read(a.isaac).to_pandas()
+    for c in isaac.columns:
+        if isaac[c].dtype == object:
+            isaac[c] = isaac[c].apply(lambda x: x.decode().strip() if isinstance(x, bytes) else x)
+    isaac["Number"] = isaac["Number"].astype(int)
+    add = zsys[["ID", "z_sys", "z_sys_err", "z_sys_grating"]].rename(columns={"ID": "Number"})
+    full = isaac.merge(add, on="Number", how="inner")
+    missing = sorted(set(add["Number"]) - set(full["Number"]))
+    if missing:
+        print(f"  WARNING z_sys IDs not found in Isaac's catalogue: {missing}")
+    full.to_csv(a.out_full, index=False)
     print("\nWrote")
     print(f"  {os.path.abspath(a.out_systemic)}")
     print(f"  {os.path.abspath(a.out_zsys)}")
+    print(f"  {os.path.abspath(a.out_full)}   ({len(full)} rows, {full.shape[1]} columns)")
 
 
 if __name__ == "__main__":
