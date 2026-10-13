@@ -39,6 +39,91 @@ SNR_MIN = {"OIII": 5.0, "Ha": 5.0}
 
 GRATINGS = ["G235M", "G235H", "G395M", "G395H"]
 
+# ----------------------------------------------------------------------
+# MUSE per-source files
+# ----------------------------------------------------------------------
+# Every MUSE product for a source lives in MUSE_subcubes/<ID>/, named
+# <ID>_<kind>. Use muse_path so all scripts agree on the names.
+ZSYS_CATALOG = f"{P2_ROOT}/jwst_catalogs/primer_minerva_in_muse_zsys.csv"
+MUSE_SUBCUBE_DIR = f"{P2_ROOT}/MUSE_subcubes"
+MUSE_CAT_DIR = f"{P2_ROOT}/MUSE_catalogs"
+
+MUSE_FILES = {
+    "subcube": "subcube.fits",                  # extract_subcubes.py
+    "subcube_png": "subcube_white.png",
+    "contsub": "lya_contsub_cube.fits",         # lya_local_contsub.py
+    "continuum": "continuum_model_cube.fits",   # the model, not for Lya
+    "contsub_png": "contsub_QA.png",
+    "position_png": "lya_position.png",         # optimize_lya_position_grating.py
+    "spectrum": "lya_spectrum.npz",             # ap_extract_specs_grating.py
+    "sliding_png": "lya_sliding_snr.png",       # sliding_snr_lya_grating.py
+    "fit_png": "lya_fit.png",                   # fit_lya_properties_grating.py
+    "nb": "lya_nb.fits",
+    "mc": "lya_mc.csv",                         # mc_lya_errors_grating.py
+    "false_pos": "false_positions.csv",         # false_pos_grating.py
+    "false_pos_png": "false_positions.png",
+    "false_snr": "false_optimal_snr.csv",       # optimize_lya_positions_f_grating.py
+}
+
+FALSE_POS_SOURCES = f"{MUSE_CAT_DIR}/lya_false_pos_sources.csv"   # manifest
+
+
+def muse_path(sid, kind, root=MUSE_SUBCUBE_DIR):
+    """Full path of a per-source MUSE file, e.g. muse_path(23070, "contsub")."""
+    sid = int(sid)
+    return f"{root}/{sid}/{sid}_{MUSE_FILES[kind]}"
+
+
+def load_sample(path=ZSYS_CATALOG, ids=None, need=("ID", "ra", "dec", "z_sys")):
+    """Read the z_sys sample, with ID as int, optionally only some IDs."""
+    df = pd.read_csv(path)
+    missing = [c for c in need if c not in df.columns]
+    if missing:
+        raise SystemExit(f"ERROR {path} has no {missing} column")
+    df["ID"] = df["ID"].astype(int)
+    if ids:
+        absent = sorted(set(ids) - set(df["ID"]))
+        if absent:
+            print(f"  WARNING IDs not in the catalogue: {absent}")
+        df = df[df["ID"].isin(ids)]
+    return df.sort_values("ID").reset_index(drop=True)
+
+
+def load_muse_cube(path):
+    """mpdaf Cube with flux [1] and variance [2], taken by index because the
+    megacube primary header carries a stray EXTNAME='DATA'."""
+    from mpdaf.obj import Cube
+    return Cube(path, ext=(1, 2))
+
+
+def air_to_vac(wave_air):
+    """Air to vacuum wavelength in AA, Ciddor (1996), as fit_lya_properties."""
+    wave_air = np.asarray(wave_air, dtype=float)
+    s2 = (1e4 / wave_air) ** 2
+    return wave_air * (1.0 + 0.05792105 / (238.0185 - s2) + 0.00167917 / (57.362 - s2))
+
+
+def vac_to_air(wave_vac):
+    """Vacuum to air wavelength in AA, the inverse of air_to_vac."""
+    wave_vac = np.asarray(wave_vac, dtype=float)
+    s2 = (1e4 / wave_vac) ** 2
+    return wave_vac / (1.0 + 0.05792105 / (238.0185 - s2) + 0.00167917 / (57.362 - s2))
+
+
+def lya_obs_air(z):
+    """Observed Lya wavelength in AA at redshift z, in air like the MUSE cube.
+
+    z_sys is a vacuum redshift (NIRSpec), so 1215.67 (1 + z) is a vacuum
+    wavelength. Placing it on the air-calibrated cube without converting puts
+    it about 1.4 AA (about 80 km/s) too red.
+    """
+    return float(vac_to_air(LYA_REST * (1.0 + z)))
+
+
+def velocity_band(lya_wave, dv_blue, dv_red):
+    """Wavelength edges of the band -dv_blue to +dv_red km/s about lya_wave."""
+    return lya_wave * (1.0 - dv_blue / C_KMS), lya_wave * (1.0 + dv_red / C_KMS)
+
 
 def pick_zsys(row, snr_min=None):
     """Return (z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating).
@@ -111,3 +196,118 @@ def zsys_quality(line):
 def dz_to_kms(z_a, z_b):
     """Velocity of z_a relative to z_b, c (z_a - z_b) / (1 + z_b)."""
     return C_KMS * (np.asarray(z_a, float) - np.asarray(z_b, float)) / (1.0 + np.asarray(z_b, float))
+
+# ----------------------------------------------------------------------
+# Line S/N
+# ----------------------------------------------------------------------
+# One definition, used by the position optimiser, the sliding search and the
+# false positives. Flux is summed over the channels whose centres fall in the
+# window, F = sum(f) dlam, with error sqrt(sum(var)) dlam.
+SLIDE_WINDOW = 10.0     # AA
+SLIDE_STEP = 1.0        # AA
+SLIDE_SMOOTH = 2.0      # Gaussian sigma, in steps
+
+
+def window_snr(wave, flux, var, lo, hi):
+    """(flux, error, S/N) summed over channels with lo <= wave <= hi."""
+    m = (wave >= lo) & (wave <= hi) & np.isfinite(flux) & np.isfinite(var)
+    if m.sum() < 2:
+        return np.nan, np.nan, np.nan
+    dw = float(np.median(np.diff(wave)))
+    f = float(np.sum(flux[m]) * dw)
+    e = float(np.sqrt(np.sum(var[m])) * dw)
+    return f, e, (f / e if e > 0 else np.nan)
+
+
+def sliding_snr(wave, flux, var, window=SLIDE_WINDOW, step=SLIDE_STEP,
+                smooth=SLIDE_SMOOTH, lo=None, hi=None):
+    """S/N of a window slid along the spectrum.
+
+    Returns (centres, snr, snr_smooth). lo and hi limit the centres (AA), to
+    save time when only a band is needed. The smoothing is a Gaussian of
+    sigma = smooth steps, as in the JELS-ID pipeline.
+    """
+    from scipy.ndimage import gaussian_filter1d
+    half = window / 2.0
+    c0 = wave.min() + half if lo is None else max(lo, wave.min() + half)
+    c1 = wave.max() - half if hi is None else min(hi, wave.max() - half)
+    centres = np.arange(c0, c1 + step / 2, step)
+    snr = np.array([window_snr(wave, flux, var, c - half, c + half)[2] for c in centres])
+    smooth_snr = gaussian_filter1d(np.nan_to_num(snr), sigma=smooth) if smooth else snr
+    return centres, snr, smooth_snr
+
+
+def best_centre(wave, flux, var, band, window=SLIDE_WINDOW, step=SLIDE_STEP,
+                smooth=SLIDE_SMOOTH):
+    """Centre (AA) and smoothed S/N of the sliding-window peak inside band.
+
+    The S/N is computed 50 AA either side of the band so the smoothing is
+    not cut off at the band edges, then the peak is taken inside the band.
+    """
+    centres, _, sm = sliding_snr(wave, flux, var, window, step, smooth,
+                                 lo=band[0] - 50, hi=band[1] + 50)
+    m = (centres >= band[0]) & (centres <= band[1])
+    if not m.any():
+        return np.nan, np.nan
+    i = int(np.argmax(sm[m]))
+    return float(centres[m][i]), float(sm[m][i])
+
+
+# ----------------------------------------------------------------------
+# Nearest-object rule for the aperture shift
+# ----------------------------------------------------------------------
+# A trial aperture centre is allowed only if it is at least as close to the
+# target as to any other object in Isaac's catalogue, so the shift cannot
+# carry the aperture onto a neighbour. Used for the real sources and, with the
+# random position as the target, for the false positives.
+ISAAC_CATALOG = f"{P2_ROOT}/jwst_catalogs/cosmos_primer_minerva_production.fits"
+NEIGHBOUR_RADIUS = 2.0      # arcsec. Beyond ~1.4" no neighbour can win for a
+                            # 0.4" shift (twice the largest centre offset)
+
+
+def load_isaac_positions(path=ISAAC_CATALOG):
+    """Number, RA, Dec arrays of Isaac's catalogue."""
+    from astropy.table import Table
+    t = Table.read(path)
+    return (np.asarray(t["Number"], dtype=int), np.asarray(t["RA"], dtype=float),
+            np.asarray(t["Dec"], dtype=float))
+
+
+def neighbours(ra0, dec0, isaac, exclude_id=None, radius=NEIGHBOUR_RADIUS):
+    """(ids, ra, dec, sep_arcsec) of Isaac objects within radius of a position,
+    nearest first, leaving out exclude_id (the target itself)."""
+    num, ra, dec = isaac
+    dx = (ra - ra0) * np.cos(np.deg2rad(dec0)) * 3600.0
+    dy = (dec - dec0) * 3600.0
+    sep = np.hypot(dx, dy)
+    m = sep < radius
+    if exclude_id is not None:
+        m &= num != int(exclude_id)
+    o = np.argsort(sep[m])
+    return num[m][o], ra[m][o], dec[m][o], sep[m][o]
+
+
+FALSE_POS_CLEAR = 1.0   # arcsec. For the false positions, an aperture "contains"
+                        # an Isaac object when the object is within this of the
+                        # aperture centre: the 0.6" radius plus ~0.35" (half the
+                        # MUSE PSF FWHM) so light from just outside cannot leak in
+
+
+def clear_of_objects(ra_c, dec_c, nb_ra, nb_dec, clear=FALSE_POS_CLEAR):
+    """True if no object lies within clear arcsec of (ra_c, dec_c)."""
+    if len(nb_ra) == 0:
+        return True
+    cosd = np.cos(np.deg2rad(dec_c))
+    d = np.hypot((np.asarray(nb_ra) - ra_c) * cosd, np.asarray(nb_dec) - dec_c) * 3600.0
+    return bool(d.min() > clear)
+
+
+def closer_to_target(ra_c, dec_c, ra0, dec0, nb_ra, nb_dec):
+    """True if (ra_c, dec_c) is at least as close to (ra0, dec0) as to every
+    neighbour position. Flat-sky separations, fine on arcsecond scales."""
+    if len(nb_ra) == 0:
+        return True
+    cosd = np.cos(np.deg2rad(dec0))
+    d_t = np.hypot((ra_c - ra0) * cosd, dec_c - dec0)
+    d_n = np.hypot((np.asarray(nb_ra) - ra_c) * cosd, np.asarray(nb_dec) - dec_c)
+    return bool(d_t <= d_n.min())

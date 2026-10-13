@@ -1,279 +1,158 @@
 #!/usr/bin/env python
 """
-Extract aperture spectra for P2 grating (spectroscopic) sources from
-continuum-subtracted MUSE subcubes.
+ap_extract_specs_grating.py
 
-Adapted from the P1 photometric version:
-  - Keyed on the catalogue ID column (cast to int), cube pattern
-    source_{ID}_continuum_cube_velocity.fits
-  - z_sys is the systemic redshift (falling back to z_dja where blank).
-  - The FULL spectral axis of each subcube is extracted, not a window. The
-    asymmetric velocity band (-dv_blue/+dv_red km/s about systemic Lya, default
-    -300/+1200) is recorded in the .npz so downstream plots can shade the search
-    region while the extracted spectrum continues either side of it.
-  - Cubes loaded with ext=(data_ext, var_ext) to avoid the mpdaf name collision
-    from the megacube's stray EXTNAME='DATA' primary card.
-  - Spatial dx/dy offsets read internally from the optimal offsets CSV, so the
-    script loops over all sources itself. No slurm array needed. --id runs one.
+Extract the 0.6 arcsec radius aperture spectrum of each source from its
+continuum-subtracted MUSE subcube, at the position from
+optimize_lya_position_grating.py, for the PRIMER + MINERVA z_sys sample.
+
+The method is unchanged from the JELS-ID version. The aperture is centred on
+the pixel nearest Isaac's position plus the optimised offset, and flux and
+variance are summed over the full wavelength range of the cube (NaN-safe).
+The Lya band, -dv_blue to +dv_red km/s about Lya at z_sys (default
+-300/+1200), is stored with the spectrum for the later steps.
+
+What changed
+  - reads jwst_catalogs/primer_minerva_in_muse_zsys.csv, keyed on Isaac's ID,
+    with z_sys for every source (no z_dja fallback)
+  - reads MUSE_subcubes/<ID>/<ID>_lya_contsub_cube.fits and
+    MUSE_catalogs/lya_optimal_offsets.csv
+  - writes the spectrum into the source's folder
+  - Lya and the band at their air wavelengths, as in lya_local_contsub.py
+  - the spectrum at the original position is saved as well (flux_orig,
+    var_orig), so the effect of the shift can be checked later
+
+Inputs
+------
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv     ID, ra, dec, z_sys
+  MUSE_catalogs/lya_optimal_offsets.csv             ID, dx_arcsec, dy_arcsec
+  MUSE_subcubes/<ID>/<ID>_lya_contsub_cube.fits
+
+Output
+------
+  MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz
+      wave (air, AA), flux, var          at the optimised position
+      flux_orig, var_orig                at the original position
+      ID, ra, dec (aperture centre), ra_src, dec_src (Isaac), dx, dy,
+      x_pix, y_pix, aperture, z (= z_sys), z_sys_err, lya_obs (air),
+      band_min, band_max, dv_blue, dv_red
+  Flux in 1e-20 erg/s/cm2/AA, variance in its square.
+
+With --no-offsets the aperture stays on Isaac's position (dx = dy = 0) and
+the offsets CSV is not needed.
+
+Usage
+-----
+python ap_extract_specs_grating.py
+python ap_extract_specs_grating.py --ids 23070 50803
+python ap_extract_specs_grating.py --no-offsets
 """
 
 import argparse
 import os
+
 import numpy as np
 import pandas as pd
-from mpdaf.obj import Cube
-import astropy.units as u
 
-LYA_REST = 1215.67  # AA
-C_KMS = 299792.458
+import p2_common as pc
 
-
-# ============================================================
-# Utilities
-# ============================================================
-
-def resolve_redshift(row, zcol, zcol_fallback):
-    """Return (z, source_tag) from zcol, else zcol_fallback, else (NaN, None)."""
-    z = pd.to_numeric(row.get(zcol), errors="coerce")
-    if np.isfinite(z):
-        return float(z), zcol
-    if zcol_fallback:
-        z_fb = pd.to_numeric(row.get(zcol_fallback), errors="coerce")
-        if np.isfinite(z_fb):
-            return float(z_fb), zcol_fallback
-    return np.nan, None
+OFFSETS = f"{pc.MUSE_CAT_DIR}/lya_optimal_offsets.csv"
 
 
-def velocity_band(lya_obs, dv_blue, dv_red):
-    """Observed-frame edges (AA) of the asymmetric velocity band about lya_obs."""
-    wmin = lya_obs * (1.0 - dv_blue / C_KMS)
-    wmax = lya_obs * (1.0 + dv_red / C_KMS)
-    return wmin, wmax
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=pc.ZSYS_CATALOG)
+    p.add_argument("--offset-csv", default=OFFSETS)
+    p.add_argument("--no-offsets", action="store_true",
+                   help="extract at Isaac's position, ignore the offsets CSV")
+    p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
+    p.add_argument("--ids", type=int, nargs="+", help="only these IDs")
+    p.add_argument("--aperture", type=float, default=0.6, help="radius, arcsec")
+    p.add_argument("--dv-blue", type=float, default=300.0)
+    p.add_argument("--dv-red", type=float, default=1200.0)
+    return p.parse_args()
 
 
-def load_cube(path, data_ext, var_ext):
-    return Cube(path, ext=(data_ext, var_ext))
+def shift_radec(ra, dec, dx_arcsec, dy_arcsec):
+    return ra + dx_arcsec / 3600.0 / np.cos(np.deg2rad(dec)), dec + dy_arcsec / 3600.0
 
 
 def coords_to_pixel(cube, ra, dec):
-    pix = cube.wcs.sky2pix([[dec, ra]], nearest=True, unit="deg")
-    y, x = pix[0]
+    y, x = cube.wcs.sky2pix([[dec, ra]], nearest=True, unit="deg")[0]
     return int(x), int(y)
 
 
-def shift_radec(ra_deg, dec_deg, dx_arcsec=0.0, dy_arcsec=0.0):
-    d_ra = dx_arcsec / 3600.0 / np.cos(np.deg2rad(dec_deg))
-    d_dec = dy_arcsec / 3600.0
-    return ra_deg + d_ra, dec_deg + d_dec
-
-
-def build_aperture_mask(nx, ny, x0, y0, radius_pix):
+def aperture_spectrum(flux, var, x0, y0, radius_pix):
+    ny, nx = flux.shape[1:]
     yy, xx = np.indices((ny, nx))
-    rr = np.sqrt((xx - x0) ** 2 + (yy - y0) ** 2)
-    return rr <= radius_pix
+    ap = np.hypot(xx - x0, yy - y0) <= radius_pix
+    return np.nansum(flux[:, ap], axis=1), np.nansum(var[:, ap], axis=1)
 
-
-def extract_1d_spectrum_with_var(cube, xpix, ypix, aperture_arcsec, pixel_scale,
-                                 wave_min=None, wave_max=None):
-    """Aperture-summed 1D spectrum. With wave_min/wave_max None, the full
-    spectral axis of the cube is returned."""
-    radius_pix = aperture_arcsec / pixel_scale
-    ny, nx = cube.shape[1], cube.shape[2]
-    apmask = build_aperture_mask(nx, ny, xpix, ypix, radius_pix)
-
-    if wave_min is None or wave_max is None:
-        sub = cube
-    else:
-        sub = cube.select_lambda(wave_min, wave_max)
-    wave = sub.wave.coord()
-
-    flux_1d = (sub.data * apmask).sum(axis=(1, 2))
-    var_1d = (sub.var * apmask).sum(axis=(1, 2))
-
-    return wave, flux_1d, var_1d
-
-
-def z_to_wavelength(z, rest_wavelength=LYA_REST):
-    return (rest_wavelength * (1 + z)) * u.AA
-
-
-# ============================================================
-# Argument parser
-# ============================================================
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Extract aperture spectra for P2 grating sources from MUSE subcubes"
-    )
-
-    parser.add_argument("--csv", required=True,
-                        help="Input catalogue with ID, ra, dec, z_sys columns")
-    parser.add_argument("--offset-csv", required=True,
-                        help="optimal_offsets_grating.csv with ID, dx_arcsec, dy_arcsec")
-
-    parser.add_argument("--id", type=int, default=None,
-                        help="Single source ID to process. If omitted, run all.")
-
-    parser.add_argument("--id-col", default="ID")
-    parser.add_argument("--z-col", default="z_sys")
-    parser.add_argument("--z-col-fallback", default="z_dja",
-                        help="Column used where z-col is blank (default z_dja). "
-                             "Set to '' to disable.")
-
-    parser.add_argument("--aperture", type=float, default=0.6,
-                        help="Aperture radius in arcsec")
-    parser.add_argument("--pixscale", type=float, default=0.2,
-                        help="Arcsec per pixel")
-
-    parser.add_argument("--dv-blue", type=float, default=300.0,
-                        help="Blue half-width (km/s) of the search band recorded "
-                             "in the .npz. Default 300, matches contsub.")
-    parser.add_argument("--dv-red", type=float, default=1200.0,
-                        help="Red half-width (km/s) of the search band recorded "
-                             "in the .npz. Default 1200, matches contsub.")
-
-    parser.add_argument("--cube-dir", required=True,
-                        help="Directory of continuum-subtracted cubes")
-    parser.add_argument("--data-ext", type=int, default=1,
-                        help="FITS extension index for the data cube")
-    parser.add_argument("--var-ext", type=int, default=2,
-                        help="FITS extension index for the variance cube")
-
-    parser.add_argument("--outdir",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts",
-                        help="Output directory for extracted spectra")
-
-    return parser.parse_args()
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
     args = parse_args()
+    print("ap_extract_specs_grating.py")
+    print(f"Reading catalogue   {os.path.abspath(args.catalog)}")
+    df = pc.load_sample(args.catalog, args.ids)
+    print(f"  {len(df)} sources")
 
-    csv_path = os.path.abspath(args.csv)
-    offset_path = os.path.abspath(args.offset_csv)
-    cube_dir = os.path.abspath(args.cube_dir)
-    outdir = os.path.abspath(args.outdir)
-    os.makedirs(outdir, exist_ok=True)
+    offsets = None
+    if not args.no_offsets:
+        off_path = os.path.abspath(args.offset_csv)
+        print(f"Reading offsets     {off_path}")
+        offsets = pd.read_csv(off_path).set_index("ID")
+    else:
+        print("No offsets, apertures on Isaac's positions")
+    print(f"Aperture {args.aperture}\" radius\n")
 
-    print("[PATHS]")
-    print(f"  Input catalogue : {csv_path}")
-    print(f"  Offset CSV      : {offset_path}")
-    print(f"  Cube directory  : {cube_dir}")
-    print(f"  Output directory: {outdir}")
-    print("")
-
-    df = pd.read_csv(csv_path)
-    offsets = pd.read_csv(offset_path)
-
-    for col in (args.id_col, "ra", "dec", args.z_col):
-        if col not in df.columns:
-            raise KeyError(
-                f"Column '{col}' not found in catalogue. Available: {list(df.columns)}"
-            )
-    use_fallback = bool(args.z_col_fallback)
-    if use_fallback and args.z_col_fallback not in df.columns:
-        raise KeyError(
-            f"Fallback column '{args.z_col_fallback}' not found. "
-            f"Pass --z-col-fallback '' to disable. Available: {list(df.columns)}"
-        )
-    if "ID" not in offsets.columns:
-        raise KeyError(
-            f"Column 'ID' not found in offset CSV. Available: {list(offsets.columns)}"
-        )
-
-    # Index offsets by ID for fast lookup
-    offsets = offsets.set_index("ID")
-
-    if args.id is not None:
-        df = df[df[args.id_col].astype("Int64") == args.id]
-        if len(df) == 0:
-            raise ValueError(f"Requested ID {args.id} not found in catalogue")
-
+    n_ok, skipped = 0, []
     for _, row in df.iterrows():
-        idx = int(row[args.id_col])
-        ra0 = row["ra"]
-        dec0 = row["dec"]
-
-        z, z_src = resolve_redshift(row, args.z_col, args.z_col_fallback)
-        if not np.isfinite(z):
-            print(f"[SKIP] Src {idx}: no finite {args.z_col}"
-                  f"{' or ' + args.z_col_fallback if use_fallback else ''}")
+        sid, z = int(row["ID"]), float(row["z_sys"])
+        ra0, dec0 = float(row["ra"]), float(row["dec"])
+        cube_path = pc.muse_path(sid, "contsub", args.subcube_dir)
+        if not os.path.exists(cube_path):
+            print(f"  {sid}  SKIP no contsub cube at {cube_path}")
+            skipped.append(sid)
             continue
-        if z_src != args.z_col:
-            print(f"[INFO] Src {idx}: {args.z_col} blank, using {z_src}={z:.4f}")
-
-        if idx not in offsets.index:
-            print(f"[SKIP] Src {idx}: no entry in offset CSV")
+        if offsets is not None and sid not in offsets.index:
+            print(f"  {sid}  SKIP not in the offsets CSV")
+            skipped.append(sid)
             continue
+        dx = float(offsets.loc[sid, "dx_arcsec"]) if offsets is not None else 0.0
+        dy = float(offsets.loc[sid, "dy_arcsec"]) if offsets is not None else 0.0
 
-        dx = float(offsets.loc[idx, "dx_arcsec"])
-        dy = float(offsets.loc[idx, "dy_arcsec"])
+        cube = pc.load_muse_cube(cube_path)
+        wave = cube.wave.coord()
+        flux = cube.data.filled(np.nan)
+        var = cube.var.filled(np.nan)
+        radius_pix = args.aperture / float(np.mean(cube.wcs.get_step(unit="arcsec")))
 
         ra, dec = shift_radec(ra0, dec0, dx, dy)
+        x, y = coords_to_pixel(cube, ra, dec)
+        x0, y0 = coords_to_pixel(cube, ra0, dec0)
+        fl, vr = aperture_spectrum(flux, var, x, y, radius_pix)
+        fl0, vr0 = aperture_spectrum(flux, var, x0, y0, radius_pix)
 
-        lya_obs = z_to_wavelength(z).value
-        band_min, band_max = velocity_band(lya_obs, args.dv_blue, args.dv_red)
+        lya_wave = pc.lya_obs_air(z)
+        band = pc.velocity_band(lya_wave, args.dv_blue, args.dv_red)
+        z_err = float(row["z_sys_err"]) if "z_sys_err" in row and pd.notna(row["z_sys_err"]) else np.nan
 
-        cube_path = os.path.join(
-            cube_dir, f"source_{idx}_lya_contsub_cube_velocity.fits"
-        )
-        if not os.path.exists(cube_path):
-            print(f"[SKIP] Src {idx}: cube not found at {cube_path}")
-            continue
+        out = pc.muse_path(sid, "spectrum", args.subcube_dir)
+        np.savez(out, wave=wave, flux=fl, var=vr, flux_orig=fl0, var_orig=vr0,
+                 ID=sid, ra=ra, dec=dec, ra_src=ra0, dec_src=dec0, dx=dx, dy=dy,
+                 x_pix=x, y_pix=y, aperture=args.aperture,
+                 z=z, z_sys_err=z_err, z_source="z_sys", lya_obs=lya_wave,
+                 band_min=band[0], band_max=band[1],
+                 dv_blue=args.dv_blue, dv_red=args.dv_red)
+        print(f"  {sid}  dx {dx:+.1f}\" dy {dy:+.1f}\", Lya {lya_wave:.1f} AA (air), "
+              f"band {band[0]:.1f}-{band[1]:.1f} AA\n         {out}", flush=True)
+        n_ok += 1
 
-        print(
-            f"[INFO] Src {idx}: dx={dx:.3f}\" dy={dy:.3f}\" "
-            f"RA={ra:.6f} Dec={dec:.6f} lambda0={lya_obs:.1f} AA "
-            f"band=[{band_min:.1f},{band_max:.1f}] AA"
-        )
-
-        cube = load_cube(cube_path, args.data_ext, args.var_ext)
-        xpix, ypix = coords_to_pixel(cube, ra, dec)
-
-        # Full spectral axis, no window
-        wave, flux, var = extract_1d_spectrum_with_var(
-            cube, xpix, ypix,
-            args.aperture, args.pixscale,
-            wave_min=None, wave_max=None,
-        )
-
-        out = os.path.join(outdir, f"{idx}_spectrum.npz")
-        np.savez(
-            out,
-            wave=wave, flux=flux, var=var,
-            ra=ra, dec=dec, z=z, z_source=z_src, lya_obs=lya_obs,
-            band_min=band_min, band_max=band_max,
-            dv_blue=args.dv_blue, dv_red=args.dv_red,
-            dx=dx, dy=dy,
-        )
-        print(f"[OK] Src {idx}: saved {out}")
-
-    print("")
-    print("[DONE]")
+    print("\n--- Summary ---")
+    print(f"  extracted   {n_ok}")
+    print(f"  skipped     {len(skipped)}")
 
 
 if __name__ == "__main__":
     main()
-
-
-"""
-run on one source
-python ap_extract_specs_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --offset-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --id 15479 \
-  --aperture 0.6
-
-run on all sources (no slurm needed). Full spectrum extracted, band recorded.
-python ap_extract_specs_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --offset-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --aperture 0.6 \
-  --dv-blue 300 --dv-red 1200
-"""

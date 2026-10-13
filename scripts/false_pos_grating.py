@@ -1,298 +1,319 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
-Generate random off-source (false-positive) positions in a P2 grating-source
-continuum-subtracted MUSE subcube, and plot them on the white-light image.
+false_pos_grating.py
 
-Adapted from the P1 version:
-  - Keyed on the catalogue ID column (cast to int); cube pattern
-    source_{ID}_lya_contsub_cube_velocity.fits
-  - z_av is the spectroscopic redshift, carried through to the positions CSV
-    as z_av (the downstream optimiser maps it to observed Lya +/- a fixed
-    half-width).
-  - Data/variance read by integer extension index (1, 2) to avoid the mpdaf /
-    astropy name collision from the megacube's stray EXTNAME='DATA' primary.
-  - Runs from the terminal per source; loops over all IDs when --id is omitted.
+Place random off-source positions in each continuum-subtracted MUSE subcube,
+the first step of the false-positive calibration of the Lya detection S/N
+(Patrick et al., Paper 1, Sect. 3.3.3).
 
-For each source it excludes a central box around the true position and an edge
-margin, samples N random positions in the remaining area, writes them to a CSV,
-and saves a white-light diagnostic plot.
+For each source, --n (500) positions are drawn uniformly over the subcube,
+outside an --box (8 arcsec) square centred on the source and at least
+--edge-margin (1 arcsec) from the edges, as in Paper 1. The seed is --seed
+plus the source ID, so the positions are the same on every run.
 
-Edge handling:
-  - Any source whose collapsed white-light image contains one or more NaN
-    pixels is skipped entirely (no CSV, no plot). This removes off-edge and
-    partially-off-edge subcubes from the false-positive population. Loosen by
-    changing the check in process_source if a stricter/looser rule is wanted.
+Noise only (new, not in Paper 1)
+--------------------------------
+The false positions should measure noise and the search boost, never another
+galaxy's light, but otherwise have the same freedom as the real sources. A
+position is rejected only if its starting aperture would contain an object
+from Isaac's catalogue, i.e. an object within --clear (1.0 arcsec: the 0.6
+arcsec radius plus about half the MUSE PSF FWHM) of the position, plus 0.15
+arcsec so the aperture still qualifies after snapping to a pixel.
+optimize_lya_positions_f_grating.py then blocks any shift that would bring an
+object within --clear of the aperture, just as the real sources cannot shift
+onto a neighbour. --clear 0 gives the Paper 1 placement. The fraction of the
+subcube left by the cut is in the manifest.
+
+Where the subcube runs past the edge of the MUSE footprint, its spaxels have
+no data. Positions are only placed where no aperture of the shift search can
+reach such a spaxel (the 0.6 arcsec radius + 0.57 arcsec shift + 0.28 arcsec
+for pixel snapping, about 1.45 arcsec), so every false aperture is full of
+data, as the real ones are. The fraction of the subcube without data is in
+the manifest (nodata_frac).
+
+A source is left out of the false positives only when its Lya band has data
+in less than --min-coverage (half) of its channels in the extracted spectrum,
+e.g. a band in the AO laser gap. Its positions would all give S/N = 0 and
+pull the thresholds down.
+
+What changed from the JELS-ID version
+  - reads jwst_catalogs/primer_minerva_in_muse_zsys.csv (z_sys) and
+    MUSE_subcubes/<ID>/<ID>_lya_contsub_cube.fits
+  - the coverage check, and a fixed seed per source
+  - outputs in each source's folder, and the manifest in MUSE_catalogs
+  - the figure shows the positions on the Lya-band narrowband image rather
+    than the white-light image, and only the band is read from disk
+
+Inputs
+------
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv     ID, ra, dec, z_sys
+  MUSE_subcubes/<ID>/<ID>_lya_contsub_cube.fits
+  MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz          band and coverage
+  jwst_catalogs/cosmos_primer_minerva_production.fits   Isaac positions
+
+Outputs
+-------
+  MUSE_subcubes/<ID>/<ID>_false_positions.csv
+      index, ra, dec, x_pix, y_pix, nearest_isaac_arcsec
+  MUSE_subcubes/<ID>/<ID>_false_positions.png
+      positions on the Lya-band image, with Isaac objects and the circles
+      no starting aperture may contain
+  MUSE_catalogs/lya_false_pos_sources.csv
+      ID, used (1/0), reason, n_positions, allowed_frac (area left by the
+      Isaac and no-data cuts), nodata_frac, band_coverage, lya_obs, band edges
+
+A full run replaces the manifest. --ids patches only those rows.
+
+Usage
+-----
+python false_pos_grating.py
+python false_pos_grating.py --ids 23070 50803
 """
 
 import argparse
 import os
-import warnings
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
-from astropy.coordinates import SkyCoord
-import astropy.units as u
+
+import p2_common as pc
 
 
-def get_wcs2d(hdr):
-    return WCS(hdr).celestial
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=pc.ZSYS_CATALOG)
+    p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
+    p.add_argument("--manifest", default=pc.FALSE_POS_SOURCES)
+    p.add_argument("--ids", type=int, nargs="+", help="only these IDs")
+    p.add_argument("--n", type=int, default=500, help="positions per source (Paper 1: 500)")
+    p.add_argument("--box", type=float, default=8.0,
+                   help="side of the excluded square about the source, arcsec (Paper 1: 8)")
+    p.add_argument("--edge-margin", type=float, default=1.0, help="arcsec (Paper 1: 1)")
+    p.add_argument("--aperture", type=float, default=0.6,
+                   help="radius, arcsec, as the real sources (sets how far from no-data "
+                        "spaxels a position must be)")
+    p.add_argument("--dx-max", type=float, default=0.4, help="arcsec, as the real sources")
+    p.add_argument("--min-coverage", type=float, default=0.5,
+                   help="minimum fraction of band channels with data")
+    p.add_argument("--clear", type=float, default=pc.FALSE_POS_CLEAR,
+                   help="an aperture contains an Isaac object within this, arcsec "
+                        "(0 for Paper 1). Must match optimize_lya_positions_f_grating.py")
+    p.add_argument("--isaac", default=pc.ISAAC_CATALOG)
+    p.add_argument("--seed", type=int, default=2026, help="seed is this plus the ID")
+    p.add_argument("--no-plots", action="store_true")
+    return p.parse_args()
 
 
-def collapse_white_light(data, stat=None, method="median"):
-    """Collapse the cube along the spectral axis (assumed axis 0 in numpy order,
-    i.e. FITS NAXIS3) after masking non-finite and non-positive variance."""
-    valid = np.isfinite(data)
-    if stat is not None:
-        valid &= np.isfinite(stat) & (stat > 0)
-
-    data_masked = np.where(valid, data, np.nan)
-
-    if method == "median":
-        white = np.nanmedian(data_masked, axis=0)
-    elif method == "sum":
-        white = np.nansum(data_masked, axis=0)
-    else:
-        raise ValueError("method must be 'median' or 'sum'")
-    return white
+def band_coverage(spec_path):
+    """Fraction of channels in the Lya band with data, and the band."""
+    d = np.load(spec_path)
+    wave, var = d["wave"], d["var"]
+    band = (float(d["band_min"]), float(d["band_max"]))
+    inb = (wave >= band[0]) & (wave <= band[1])
+    good = np.isfinite(var[inb]) & (var[inb] > 0)
+    return (float(good.mean()) if inb.any() else 0.0), band, float(d["lya_obs"]), wave
 
 
-def generate_false_positions_outside_box(
-    w2d, nx, ny, source_coord,
-    n_positions=100, box_size_arcsec=8.0,
-    edge_margin_arcsec=1.0, rng_seed=None, max_iters=20,
-):
-    """Sample uniformly outside a central box around the source and inside an
-    edge margin. Box default is 8 arcsec to match the paper's 8x8 exclusion."""
-    rng = np.random.default_rng(rng_seed)
+def nearest_object(x, y, obj_x, obj_y, pixscale):
+    """Distance in arcsec from each (x, y) to the nearest object."""
+    if len(obj_x) == 0:
+        return np.full(np.shape(x), np.inf)
+    from scipy.spatial import cKDTree
+    d, _ = cKDTree(np.column_stack([obj_x, obj_y])).query(np.column_stack([x, y]))
+    return d * pixscale
 
-    pix_scales_deg = proj_plane_pixel_scales(w2d)
-    arcsec_per_pix_x = pix_scales_deg[0] * 3600.0
-    arcsec_per_pix_y = pix_scales_deg[1] * 3600.0
 
-    sx, sy = w2d.world_to_pixel(source_coord)
-
-    half_box_arcsec = box_size_arcsec / 2.0
-    hx = half_box_arcsec / arcsec_per_pix_x
-    hy = half_box_arcsec / arcsec_per_pix_y
-
-    mx = edge_margin_arcsec / arcsec_per_pix_x
-    my = edge_margin_arcsec / arcsec_per_pix_y
-
-    x_lo, x_hi = mx, nx - 1 - mx
-    y_lo, y_hi = my, ny - 1 - my
+def place(nx, ny, sx, sy, n, half_box_pix, margin_pix, rng, obj_x, obj_y,
+          pixscale, avoid, data_ok=None):
+    """n uniform pixel positions outside the box about (sx, sy), inside the
+    edge margin, at least avoid arcsec from every object and, if data_ok is
+    given, on a pixel where data_ok is True. Also returns the fraction of the
+    area outside the box that these cuts leave."""
+    x_lo, x_hi = margin_pix, nx - 1 - margin_pix
+    y_lo, y_hi = margin_pix, ny - 1 - margin_pix
     if not (x_lo < x_hi and y_lo < y_hi):
-        raise RuntimeError("Edge margin too large for cube size; no allowed area remains.")
+        raise RuntimeError("edge margin leaves no area")
 
-    accepted = []
-    for _ in range(max_iters):
-        need = n_positions - len(accepted)
+    def ok(x, y):
+        good = (np.abs(x - sx) > half_box_pix[0]) | (np.abs(y - sy) > half_box_pix[1])
+        if avoid > 0:
+            good &= nearest_object(x, y, obj_x, obj_y, pixscale) >= avoid
+        if data_ok is not None:
+            ix = np.clip(np.round(x).astype(int), 0, nx - 1)
+            iy = np.clip(np.round(y).astype(int), 0, ny - 1)
+            good &= data_ok[iy, ix]
+        return good
+
+    # Area left by the object cut, from a fine uniform sample
+    tx = rng.uniform(x_lo, x_hi, 20000)
+    ty = rng.uniform(y_lo, y_hi, 20000)
+    in_area = (np.abs(tx - sx) > half_box_pix[0]) | (np.abs(ty - sy) > half_box_pix[1])
+    frac = float(ok(tx, ty)[in_area].mean()) if in_area.any() else 0.0
+
+    xs, ys = [], []
+    for _ in range(200):
+        need = n - len(xs)
         if need <= 0:
             break
-        batch = max(5 * need, 200)
-        xs = rng.uniform(x_lo, x_hi, size=batch)
-        ys = rng.uniform(y_lo, y_hi, size=batch)
-        inside = (np.abs(xs - sx) <= hx) & (np.abs(ys - sy) <= hy)
-        for x, y in zip(xs[~inside], ys[~inside]):
-            accepted.append((x, y))
-            if len(accepted) >= n_positions:
-                break
-
-    if len(accepted) < n_positions:
-        warnings.warn(
-            f"Generated {len(accepted)} positions after {max_iters} iterations; "
-            f"consider reducing --n or the central box size."
-        )
-
-    xs = np.array([p[0] for p in accepted], dtype=float)
-    ys = np.array([p[1] for p in accepted], dtype=float)
-    coords = w2d.pixel_to_world(xs, ys)
-    return coords, accepted, (sx, sy), (hx, hy), (x_lo, x_hi, y_lo, y_hi)
+        x = rng.uniform(x_lo, x_hi, size=20 * need + 200)
+        y = rng.uniform(y_lo, y_hi, size=20 * need + 200)
+        g = ok(x, y)
+        xs.extend(x[g][:need])
+        ys.extend(y[g][:need])
+    return np.array(xs[:n]), np.array(ys[:n]), (x_lo, x_hi, y_lo, y_hi), frac
 
 
-def process_source(sid, ra, dec, z, cube_dir, outdir, args):
-    cube_path = os.path.join(cube_dir, f"source_{sid}_lya_contsub_cube_velocity.fits")
-    if not os.path.exists(cube_path):
-        print(f"[SKIP] Src {sid}: cube not found at {cube_path}")
-        return False
-
-    source_coord = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
-
-    with fits.open(cube_path, memmap=True) as hdul:
-        # Read by integer index to avoid the DATA name collision
-        data = hdul[args.data_ext].data
-        hdr = hdul[args.data_ext].header
-        stat = hdul[args.var_ext].data if len(hdul) > args.var_ext else None
-
-        w2d = get_wcs2d(hdr)
-
-        # --- Edge guard ---
-        # Skip if ANY spatial pixel is all-NaN through the spectral axis. This is
-        # exactly the condition that triggers numpy's "All-NaN slice encountered"
-        # warning inside nanmedian, and it is what leaves NaN pixels in the
-        # collapsed white-light image. Checked on the raw data before collapse so
-        # it applies regardless of collapse method.
-        data_arr = np.asarray(data, dtype=float)
-        allnan_map = np.all(~np.isfinite(data_arr), axis=0)
-        n_allnan = int(np.count_nonzero(allnan_map))
-        if n_allnan > 0:
-            frac = n_allnan / allnan_map.size
-            print(f"[SKIP] Src {sid}: {n_allnan} all-NaN spectral column(s) "
-                  f"({frac:.1%}) would trigger an All-NaN slice; treating as "
-                  f"off-edge. No false positions written.")
-            return False
-
-        white = collapse_white_light(data, stat=stat, method=args.collapse)
-        ny, nx = white.shape
-
-        coords, pix_positions, (sx, sy), (hx, hy), (x_lo, x_hi, y_lo, y_hi) = \
-            generate_false_positions_outside_box(
-                w2d, nx, ny, source_coord,
-                n_positions=args.n, box_size_arcsec=args.box,
-                edge_margin_arcsec=args.edge_margin, rng_seed=args.seed,
-            )
-
-    csv_out = os.path.join(outdir, f"source_{sid}_false_positions.csv")
-    png_out = os.path.join(outdir, f"source_{sid}_false_positions.png")
-
-    pd.DataFrame({
-        "ra": coords.ra.deg,
-        "dec": coords.dec.deg,
-        "z_av": [z] * len(coords),
-    }).to_csv(csv_out, index=False)
-    print(f"[OK] Src {sid}: wrote {len(coords)} positions to {csv_out}")
-
+def plot_positions(path, sid, nb, xs, ys, sx, sy, half_box_pix, limits, band, n,
+                   obj_x=(), obj_y=(), avoid_pix=0):
     fig, ax = plt.subplots(figsize=(6, 6))
-    vmin = np.nanpercentile(white, 5) if np.isfinite(white).any() else 0.0
-    vmax = np.nanpercentile(white, 99.5) if np.isfinite(white).any() else 1.0
-    ax.imshow(white, origin="lower", cmap="gray", vmin=vmin, vmax=vmax,
-              interpolation="none")
-    ax.set_aspect("equal")
-    ax.set_title(f"Src {sid}: false positions outside {args.box}\" box (N={len(coords)})")
-    ax.set_xlabel("X [pix]")
-    ax.set_ylabel("Y [pix]")
-
-    xs = np.array([p[0] for p in pix_positions])
-    ys = np.array([p[1] for p in pix_positions])
-    ax.scatter(xs, ys, marker="x", s=25, c="cyan", linewidths=1.0, label="False")
-    ax.scatter([sx], [sy], marker="+", s=60, c="red", linewidths=1.5, label="True source")
-
+    fin = nb[np.isfinite(nb)]
+    lim = np.percentile(np.abs(fin), 99) if fin.size else 1.0
+    ax.imshow(nb, origin="lower", cmap="RdGy_r", vmin=-lim, vmax=lim, interpolation="none")
+    ax.scatter(xs, ys, marker="x", s=14, c="tab:cyan", linewidths=0.8, label="false positions")
+    ax.scatter([sx], [sy], marker="+", s=80, c="k", linewidths=1.5, label="source")
+    for i, (ox, oy) in enumerate(zip(obj_x, obj_y)):
+        ax.add_patch(plt.Circle((ox, oy), avoid_pix, fill=False, color="tab:purple",
+                                lw=0.5, alpha=0.6, label="Isaac objects" if i == 0 else None))
+    ax.set_xlim(-0.5, nb.shape[1] - 0.5)
+    ax.set_ylim(-0.5, nb.shape[0] - 0.5)
+    hx, hy = half_box_pix
     ax.plot([sx - hx, sx + hx, sx + hx, sx - hx, sx - hx],
-            [sy - hy, sy - hy, sy + hy, sy + hy, sy - hy],
-            color="yellow", lw=1.0, alpha=0.8, label=f'Excluded {args.box}"')
-    ax.plot([x_lo, x_hi, x_hi, x_lo, x_lo],
-            [y_lo, y_lo, y_hi, y_hi, y_lo],
-            color="lime", lw=1.0, alpha=0.6, label="Edge margin")
-
-    ax.legend(loc="upper right", fontsize=8, frameon=True)
-    plt.tight_layout()
-    fig.savefig(png_out, dpi=200)
+            [sy - hy, sy - hy, sy + hy, sy + hy, sy - hy], color="gold", lw=1.2,
+            label="excluded box")
+    x_lo, x_hi, y_lo, y_hi = limits
+    ax.plot([x_lo, x_hi, x_hi, x_lo, x_lo], [y_lo, y_lo, y_hi, y_hi, y_lo],
+            color="tab:green", lw=1.0, label="edge margin")
+    ax.set_xlabel("x [pix]")
+    ax.set_ylabel("y [pix]")
+    ax.set_title(f"ID {sid}, {n} false positions on the Lya band "
+                 f"({band[0]:.0f}-{band[1]:.0f} " + r"$\AA$)", fontsize=10)
+    ax.legend(fontsize=7, loc="upper right")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
     plt.close(fig)
-    print(f"[OK] Src {sid}: wrote plot {png_out}")
-    return True
+
+
+def process(row, args, isaac):
+    sid = int(row["ID"])
+    rec = dict(ID=sid, used=0, reason="", n_positions=0, allowed_frac=np.nan,
+               nodata_frac=0.0, band_coverage=np.nan,
+               lya_obs=np.nan, band_min=np.nan, band_max=np.nan)
+    cube_path = pc.muse_path(sid, "contsub", args.subcube_dir)
+    spec_path = pc.muse_path(sid, "spectrum", args.subcube_dir)
+    for path, what in ((cube_path, "contsub cube"), (spec_path, "spectrum")):
+        if not os.path.exists(path):
+            rec["reason"] = f"no {what}"
+            print(f"  {sid}  SKIP no {what} at {path}")
+            return rec
+
+    cov, band, lya, wave = band_coverage(spec_path)
+    rec.update(band_coverage=round(cov, 3), lya_obs=round(lya, 3),
+               band_min=round(band[0], 3), band_max=round(band[1], 3))
+    if cov < args.min_coverage:
+        rec["reason"] = "band coverage"
+        print(f"  {sid}  SKIP only {cov:.0%} of the band has data (e.g. the AO gap)")
+        return rec
+
+    with fits.open(cube_path, memmap=True) as h:
+        hdr = h[1].header
+        # The spectrum covers every channel of the cube, so its wavelengths
+        # index the cube directly.
+        k = np.where((wave >= band[0]) & (wave <= band[1]))[0]
+        cut = np.array(h[1].data[k[0]:k[-1] + 1], dtype=float)
+        w2d = WCS(hdr).celestial
+    ny, nx = cut.shape[1:]
+    pixscale = proj_plane_pixel_scales(w2d) * 3600.0
+
+    # Spaxels without data in the band (beyond the edge of the MUSE
+    # footprint). A position is only allowed if no aperture of the shift
+    # search can reach one: 0.6" radius + 0.57" shift + 0.14" snap + 0.14".
+    nodata = np.all(~np.isfinite(cut), axis=0)
+    data_ok = None
+    if nodata.any():
+        from scipy.ndimage import distance_transform_edt
+        reach = (args.aperture + np.sqrt(2) * (args.dx_max + 0.2)) / float(np.mean(pixscale))
+        data_ok = distance_transform_edt(~nodata) >= reach
+        rec["nodata_frac"] = round(float(nodata.mean()), 3)
+    sx, sy = w2d.world_to_pixel_values(float(row["ra"]), float(row["dec"]))
+    half_box = (args.box / 2 / pixscale[0], args.box / 2 / pixscale[1])
+    margin = args.edge_margin / float(np.mean(pixscale))
+    # Isaac objects on or near the subcube, in its pixels
+    obj_x = obj_y = np.array([])
+    if isaac is not None:
+        _, ora, odec = isaac
+        ox, oy = w2d.world_to_pixel_values(ora, odec)
+        pad = (args.clear + 1) / float(np.mean(pixscale))
+        m = (ox > -pad) & (ox < nx + pad) & (oy > -pad) & (oy < ny + pad)
+        obj_x, obj_y = ox[m], oy[m]
+    ps = float(np.mean(pixscale))
+    rng = np.random.default_rng(args.seed + sid)
+    avoid = args.clear + 0.15 if args.clear > 0 else 0.0   # 0.15": pixel snap
+    xs, ys, limits, frac = place(nx, ny, sx, sy, args.n, half_box, margin, rng,
+                                 obj_x, obj_y, ps, avoid, data_ok)
+    rec["allowed_frac"] = round(frac, 3)
+    if len(xs) < args.n:
+        print(f"  {sid}  WARNING only {len(xs)} positions fit the allowed area")
+    ra, dec = w2d.pixel_to_world_values(xs, ys)
+    near = nearest_object(xs, ys, obj_x, obj_y, ps)
+
+    out = pc.muse_path(sid, "false_pos", args.subcube_dir)
+    pd.DataFrame(dict(index=np.arange(len(xs)), ra=ra, dec=dec, x_pix=np.round(xs, 3),
+                      y_pix=np.round(ys, 3), nearest_isaac_arcsec=np.round(near, 3))
+                 ).to_csv(out, index=False)
+    msg = (f"  {sid}  {len(xs)} positions, {len(obj_x)} Isaac objects on the subcube, "
+           + (f"{rec['nodata_frac']:.0%} of it without data, " if data_ok is not None else "")
+           + f"{frac:.0%} of the area allowed\n         {out}")
+    if not args.no_plots:
+        png = pc.muse_path(sid, "false_pos_png", args.subcube_dir)
+        nb = np.nansum(cut, axis=0)
+        plot_positions(png, sid, nb, xs, ys, sx, sy, half_box, limits, band, len(xs),
+                       obj_x, obj_y, avoid / ps)
+        msg += f"\n         {png}"
+    print(msg, flush=True)
+    rec.update(used=1, n_positions=len(xs))
+    return rec
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate false positions for P2 grating sources"
-    )
-    parser.add_argument("--csv", required=True,
-                        help="Catalogue with ID, ra, dec, z_av columns")
-    parser.add_argument("--cube-dir", required=True,
-                        help="Directory of continuum-subtracted line cubes")
-    parser.add_argument("--id", type=int, default=None,
-                        help="Single source ID. If omitted, run all.")
-    parser.add_argument("--id-col", default="ID")
-    parser.add_argument("--z-col", default="z_av")
-
-    parser.add_argument("--outdir",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions",
-                        help="Directory for false-position CSVs and plots")
-
-    parser.add_argument("--n", type=int, default=500,
-                        help="Number of false positions per source (paper uses 500)")
-    parser.add_argument("--box", type=float, default=8.0,
-                        help="Central exclusion box size in arcsec (paper uses 8)")
-    parser.add_argument("--edge-margin", type=float, default=1.0,
-                        help="Forbidden border near cube edges (arcsec)")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--collapse", choices=["median", "sum"], default="median")
-
-    parser.add_argument("--data-ext", type=int, default=1)
-    parser.add_argument("--var-ext", type=int, default=2)
-
-    args = parser.parse_args()
-
-    csv_path = os.path.abspath(args.csv)
-    cube_dir = os.path.abspath(args.cube_dir)
-    outdir = os.path.abspath(args.outdir)
-    os.makedirs(outdir, exist_ok=True)
-
-    print("[PATHS]")
-    print(f"  Input catalogue     : {csv_path}")
-    print(f"  Cube directory      : {cube_dir}")
-    print(f"  Output directory    : {outdir}")
+    args = parse_args()
+    print("false_pos_grating.py")
+    print(f"Reading catalogue   {os.path.abspath(args.catalog)}")
+    df = pc.load_sample(args.catalog, args.ids)
+    print(f"  {len(df)} sources")
+    print(f"{args.n} positions per source outside a {args.box:g}\" box, "
+          f"{args.edge_margin:g}\" from the edges, seed {args.seed} + ID")
+    isaac = None
+    if args.clear > 0:
+        print(f"Starting apertures clear of Isaac objects by {args.clear:g}\" "
+              f"(+0.15\" for the pixel snap), reading {os.path.abspath(args.isaac)}")
+        isaac = pc.load_isaac_positions(args.isaac)
+    else:
+        print("Isaac objects not avoided (Paper 1 placement)")
     print("")
 
-    df = pd.read_csv(csv_path)
-    for col in (args.id_col, "ra", "dec", args.z_col):
-        if col not in df.columns:
-            raise KeyError(
-                f"Column '{col}' not found. Available: {list(df.columns)}"
-            )
+    rows = [process(row, args, isaac) for _, row in df.iterrows()]
+    man = pd.DataFrame(rows)
+    out = os.path.abspath(args.manifest)
+    if args.ids and os.path.exists(out):
+        old = pd.read_csv(out)
+        man = pd.concat([old[~old["ID"].isin(man["ID"])], man]).sort_values("ID")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    man.to_csv(out, index=False)
 
-    if args.id is not None:
-        df = df[df[args.id_col].astype("Int64") == args.id]
-        if len(df) == 0:
-            raise ValueError(f"Requested ID {args.id} not found")
-
-    n_written, n_skipped = 0, 0
-    kept_ids = []
-    for _, row in df.iterrows():
-        sid = int(row[args.id_col])
-        wrote = process_source(
-            sid, float(row["ra"]), float(row["dec"]), float(row[args.z_col]),
-            cube_dir, outdir, args,
-        )
-        if wrote:
-            n_written += 1
-            kept_ids.append(sid)
-        else:
-            n_skipped += 1
-
-    # Write a manifest of the sources that were kept, for the optimiser to read
-    kept_path = os.path.join(outdir, "false_positions_kept.csv")
-    pd.DataFrame({"ID": kept_ids}).to_csv(kept_path, index=False)
-
-    print("")
-    print(f"[DONE] {n_written} sources written, {n_skipped} skipped "
-          f"(missing cube or all-NaN spectral columns)")
-    print(f"[MANIFEST] Kept IDs written to {kept_path}")
+    r = pd.DataFrame(rows)
+    print("\n--- Summary ---")
+    print(f"  with positions   {int(r['used'].sum())}")
+    for reason, g in r[r["used"] == 0].groupby("reason"):
+        print(f"  left out, {reason:<16} {g['ID'].tolist()}")
+    print(f"\nWrote\n  {out}")
 
 
 if __name__ == "__main__":
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=UserWarning)
-        main()
-
-
-"""
-run on all good sources
-python false_pos_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --n 500 --box 8.0
-  
-
-run on one source
-python false_pos_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --id 15479 --n 500 --box 8.0
-"""
+    main()

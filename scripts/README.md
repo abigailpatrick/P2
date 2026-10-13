@@ -73,123 +73,94 @@ Rerun after any `lime_fit_lines.py --ids` review.
 
 ### C. MUSE Lyα
 
-**8. Cut subcubes from the megacube** `extract_subcubes.py`
-Writes `MUSE_subcubes/subcube_JELSID_<ID>.fits`. Slow, as it reads the 200 GB cube. Does not depend on z, so only rerun for new sources.
+**8. Cut subcubes from the megacube** `extract_subcubes.py` (rewritten for Isaac IDs)
+Cuts a 101 × 101 px (20.2″) subcube, flux and variance, around every source in `jwst_catalogs/primer_minerva_in_muse_zsys.csv`, centred on Isaac's RA/Dec. Each source gets a folder `MUSE_subcubes/<ID>/`, which the later Lyα steps also write into. Writes `MUSE_subcubes/<ID>/<ID>_subcube.fits` (extensions DATA and STAT, with the exact source position in the primary header as `SRC_RA`, `SRC_DEC`, `SRC_X`, `SRC_Y`), a white-light PNG `<ID>_subcube_white.png` and `MUSE_subcubes/subcube_log.csv`. Slow, as it reads the 200 GB cube. Does not depend on z, so only rerun for new sources.
 ```bash
-python extract_subcubes.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID.csv \
-  --cube /ceph/cephfs/apatrick/musecosmos/scripts/aligned/mosaics/big_cube/MEGA_CUBE_WITH_VAR_2.fits \
-  --out-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes --in_muse_check
-```
-No single-source flag. For one source, pass a CSV holding only that row.
-
-**9. Continuum subtraction** `lya_local_contsub.py`
-Writes `MUSE_subcubes/contsub/source_<ID>_lya_contsub_cube_velocity.fits`, `source_<ID>_continuum_cube_velocity.fits` and QA plots.
-```bash
-python lya_local_contsub.py --mask_mode velocity --dv_blue 300 --dv_red 1200 \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --cube_dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/ \
-  --outdir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub
-# one source: add  --source <ID>
+python extract_subcubes.py --dry-run
+python extract_subcubes.py
+python extract_subcubes.py --ids <ID>
+python extract_subcubes.py --skip-existing    # only sources without a subcube
 ```
 
-**10. Optimise the aperture position** `optimize_lya_position_grating.py`
-Writes `MUSE_catalogs/optimal_offsets_grating.csv`.
+**9. Continuum subtraction** `lya_local_contsub.py` (rewritten for Isaac IDs)
+Running-median continuum (101 channels) per spaxel, masking -300/+1200 km/s about Lyα at z_sys, interpolated across the mask and subtracted. Lyα is placed at its air wavelength, since the cube is in air and z_sys is a vacuum redshift. Writes into each source's folder `MUSE_subcubes/<ID>/<ID>_lya_contsub_cube.fits` (use this for Lyα), `<ID>_continuum_model_cube.fits` (the model, not for Lyα) and `<ID>_contsub_QA.png`. Sources without a subcube are skipped.
 ```bash
-python optimize_lya_position_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --prior-scale 1.0 --dx-max 0.4 --dx-step 0.1 --dv-blue 300 --dv-red 1200 \
-  --outfile /ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv
-```
-No single-source mode. It always reruns every source, which is quick.
-
-**11. Extract aperture spectra** `ap_extract_specs_grating.py`
-Writes `MUSE_subcubes/dataproducts/<ID>_spectrum.npz`.
-```bash
-python ap_extract_specs_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --offset-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/optimal_offsets_grating.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --aperture 0.6 --dv-blue 300 --dv-red 1200
-# one source: add  --id <ID>
+python lya_local_contsub.py
+python lya_local_contsub.py --ids <ID>
+python lya_local_contsub.py --skip-existing
 ```
 
-**12. Sliding-window S/N** `sliding_snr_lya_grating.py`
-Writes `MUSE_catalogs/lya_sliding_snr_grating.csv` and pseudo-NB figures in `dataproducts/snr_figures/`.
+**10. Optimise the aperture position** `optimize_lya_position_grating.py` (rewritten for Isaac IDs)
+Moves the 0.6″ aperture over ±0.4″ in 0.1″ steps about Isaac's position and keeps the offset with the highest band S/N times a Gaussian prior (σ = 1″), as in Paper 1. New in P2, a trial position is only allowed if it is at least as close to the target as to any other object in Isaac's catalogue, so the aperture cannot move onto a neighbour (`--no-object-rule` turns this off). Writes `MUSE_catalogs/lya_optimal_offsets.csv` (with the S/N at the original and moved positions, `at_cap` for offsets on the edge of the grid, `n_blocked` and the nearest neighbour) and `MUSE_subcubes/<ID>/<ID>_lya_position.png` (Lyα narrowband image with both apertures and nearby Isaac objects, the S/N over the grid with blocked offsets in grey, and both spectra). A rerun lists the sources whose aperture changed, which need new MC errors. `--ids` patches only those rows.
 ```bash
-python sliding_snr_lya_grating.py \
-  --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --aperture 0.6
-# one source: add  --id <ID>   (replaces only that row in the CSV)
+python optimize_lya_position_grating.py
+python optimize_lya_position_grating.py --ids <ID>
 ```
 
-**13. Fit Lyα** `fit_lya_properties_grating.py`
-Writes `MUSE_catalogs/lya_properties.csv` and `dataproducts/snr_figures/<ID>_lya_fit.png`.
+**11. Extract aperture spectra** `ap_extract_specs_grating.py` (rewritten for Isaac IDs)
+0.6″ radius aperture at the optimised position, over the full wavelength range. Writes `MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz`, which also holds the spectrum at the original position (`flux_orig`, `var_orig`). `--no-offsets` extracts at Isaac's position without the offsets CSV.
 ```bash
-python fit_lya_properties_grating.py \
-  --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
-  --snr-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --outfile /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv \
-  --figdir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/snr_figures
-# one source: add  --id <ID>   (replaces only that row in the CSV)
+python ap_extract_specs_grating.py
+python ap_extract_specs_grating.py --ids <ID>
 ```
 
-**14. Monte Carlo errors** `mc_lya_errors_grating.py` + `merge_mc_partials.py`
-Writes `MUSE_catalogs/mc_partials/mc_row<N>.csv`, merged into `MUSE_catalogs/lya_properties_mc.csv`. Use this file for science, not `lya_properties.csv`.
+**12. Lyα detection S/N** `sliding_snr_lya_grating.py` (rewritten for Isaac IDs)
+Σ_Lyα as in Paper 1. A 10 Å window slides in 1 Å steps along each aperture spectrum, the flux in the window over its propagated error is smoothed with σ = 2 steps, and the peak inside the Lyα band gives `best_center` and `peak_snr_slide`. The S/N function lives in `p2_common.py` (`sliding_snr`, `best_centre`) and is shared with the position optimiser and the false positives. Writes `MUSE_catalogs/lya_sliding_snr.csv` and `MUSE_subcubes/<ID>/<ID>_lya_sliding_snr.png`.
 ```bash
+python sliding_snr_lya_grating.py
+python sliding_snr_lya_grating.py --ids <ID>
+```
+
+**13. Fit Lyα** `fit_lya_properties_grating.py` (rewritten for Isaac IDs)
+Fits a skew-normal convolved with the MUSE LSF within ±25 Å of `best_center`, giving z_lya, Δv, flux and FWHM, as Paper 1 but with the LSF in the model. `lya_snr` is the Σ_Lyα from step 12, the S/N for detection. As in Paper 1 the fitted flux is checked against a direct integration over the line window (`flux_line`, the central 90% of the fitted line), and the pseudo-NB is collapsed over the 10 Å detection window (`--nb-window line` uses the line window). Every source is fitted. Writes `MUSE_catalogs/lya_fits.csv`, `<ID>_lya_nb.fits` and `<ID>_lya_fit.png` (spectrum, fit and detection window on the left, 3″ pseudo-NB on the right).
+```bash
+python fit_lya_properties_grating.py
+python fit_lya_properties_grating.py --ids <ID>
+```
+
+**14. Monte Carlo errors** `mc_lya_errors_grating.py` + `merge_mc_partials.py` (rewritten for Isaac IDs)
+500 parametric-bootstrap refits per successful fit (method unchanged). Each source writes `MUSE_subcubes/<ID>/<ID>_lya_mc.csv` and the merge joins them onto the fits as `MUSE_catalogs/lya_fits_mc.csv`, which is the file for science. The merge leaves out, and lists, any MC result whose refit peak no longer matches the current fit. Array task N does the Nth ID of the sorted sample, so the numbering only changes with the sample.
+```bash
+python mc_lya_errors_grating.py --ids <ID> --n-mc 100     # quick test, merges at the end
 cd slurm
-AID=$(sbatch --parsable run_mc_lya_errors.slurm)
+N=$(python -c "import pandas as pd; print(len(pd.read_csv('/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_in_muse_zsys.csv')))")
+AID=$(sbatch --parsable --array=0-$((N-1)) run_mc_lya_errors.slurm)
 sbatch --dependency=afterok:$AID merge_mc_lya_errors.slurm
-cd ..
 ```
-Set `--array=0-(N-1)` in `run_mc_lya_errors.slurm`, where N is the number of successful fits in `lya_properties.csv`. For one source, find its row number among the successful fits, rerun that row, then merge.
-```bash
-python -c "import pandas as pd; d=pd.read_csv('/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv'); d=d[d.fit_success.astype(str).str.lower().isin(['true','1'])].reset_index(drop=True); print(d.index[d.ID==<ID>][0])"
-python mc_lya_errors_grating.py \
-  --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
-  --snr-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --properties-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv \
-  --out-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials/mc_row<N>.csv \
-  --n-mc 500 --mode model --row-index <N>
-python merge_mc_partials.py --partials-dir /ceph/cephfs/apatrick/P2/MUSE_catalogs/mc_partials
-```
-The row numbers shift if the set of successful fits changes. In that case rerun the whole array.
 
-### D. Detection thresholds
+### D. Detection thresholds (rewritten for Isaac IDs)
 
-Only needed when the continuum-subtracted cubes of the good sample change.
+Paper 1 Sect. 3.3.3. Random positions in each subcube go through exactly the search the real sources go through, and percentiles of their peak S/N are the thresholds for `lya_snr`. Rerun whenever steps 9 to 12 change.
 
 **15. Place false positions** `false_pos_grating.py`
-Writes `dataproducts/false_positions/source_<ID>_false_positions.csv`, a PNG and the manifest `false_positions_kept.csv`.
+500 positions per source outside an 8″ box and 1″ from the edges, with a fixed seed per source. A position is rejected if its starting aperture would contain an object from Isaac's catalogue, i.e. one within 1.0″ (`--clear`: the 0.6″ radius plus about half the PSF FWHM, with 0.15″ more for the pixel snap). Positions are kept about 1.45″ from any spaxel without data (where the subcube runs past the footprint edge), so no shifted aperture can reach one. Only sources whose Lyα band has data in under half its channels (the AO gap, e.g. 65863) are left out. Writes `MUSE_subcubes/<ID>/<ID>_false_positions.csv` and `.png`, and the manifest `MUSE_catalogs/lya_false_pos_sources.csv`.
 ```bash
-python false_pos_grating.py \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_by_JELS_ID_good.csv \
-  --cube-dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/ --n 500 --box 8.0
-# one source: add  --id <ID>
+python false_pos_grating.py
+python false_pos_grating.py --ids <ID>
 ```
 
-**16. Optimise the false positions** `optimize_lya_positions_f_grating.py`
-Writes `source_<ID>_false_optimal_snr.csv`. Slow, so run all sources on SLURM.
+**16. Run them through the search** `optimize_lya_positions_f_grating.py`
+Calls `search_offsets` from `optimize_lya_position_grating.py`, so the band, the 10 Å sliding S/N and the 0.4″ shift with its prior are identical to the real sources. Any shift that would bring an Isaac object within 1.0″ of the aperture is blocked, the counterpart of the real sources' nearest-object rule, so the distribution measures noise and never another galaxy. Writes `MUSE_subcubes/<ID>/<ID>_false_optimal_snr.csv`. About 1.5 to 3 minutes per source, so run on slurm.
 ```bash
-sbatch slurm/run_optimize_lya_positions_f_grating.slurm
-# one source
-python optimize_lya_positions_f_grating.py \
-  --false-csv /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions/source_<ID>_false_positions.csv \
-  --cube /ceph/cephfs/apatrick/P2/MUSE_subcubes/contsub/source_<ID>_lya_contsub_cube_velocity.fits \
-  --aperture 0.6 --dx-max 0.4 --dx-step 0.1 --prior-scale 1.0
+cd slurm
+N=$(python -c "import pandas as pd; print(len(pd.read_csv('/ceph/cephfs/apatrick/P2/jwst_catalogs/primer_minerva_in_muse_zsys.csv')))")
+sbatch --array=0-$((N-1)) run_optimize_lya_positions_f_grating.slurm
+cd ..
+# one source, quick test
+python optimize_lya_positions_f_grating.py --ids <ID> --max-positions 50
 ```
 
-**17. Detection thresholds** `false_pos_percentiles.py`
-Writes `MUSE_catalogs/false_pos_snr_percentiles.csv` (98 and 99.5 per cent S/N) and `plots/false_pos_summary.png`.
+**17. Thresholds and detections** `false_pos_percentiles.py`
+Pools every false position and gives the 90th, 95th, 98th and 99.5th percentiles (`--percentiles`), plus the same for each source. Flags every source as detected or not at each pooled threshold, and against its own 98th percentile. Prints how many offsets were blocked by Isaac objects for the false positions and for the real sources, to check the two had similar freedom. Writes `MUSE_catalogs/lya_false_pos_thresholds.csv`, `lya_false_pos_per_source.csv`, `lya_detections.csv`, `plots/lya_false_pos_hist.png` (as Paper 1 Fig. 5) and `plots/lya_false_pos_vs_wavelength.png` (does one pooled threshold suit every redshift?).
 ```bash
-python false_pos_percentiles.py \
-  --dir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts/false_positions \
-  --out-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/false_pos_snr_percentiles.csv
+python false_pos_percentiles.py
+```
+
+**17b. Check the detections by eye** `make_lya_fit_pdfs.py`
+For each threshold (default the pooled 99.5th, 98th and 95th percentiles), one PDF of the sources above it and one of those below, four `_lya_fit.png` figures per page sorted by S/N, each captioned with Σ, z_sys, Δv and any fit flag. Writes `plots/lya_fit_pdfs/lya_fits_<above|below>_<level>.pdf`.
+```bash
+python make_lya_fit_pdfs.py
+python make_lya_fit_pdfs.py --levels 99.5 98 95 90
 ```
 
 ### E. Velocity offsets and grouping
@@ -368,7 +339,6 @@ sample, zsys, Lyα detection, Lyα fit, Δv, tier, manual labels, UV, Hα/Hβ fl
 
 **Small fixes**
 
-- Confirm that `MEGA_CUBE_VAR_2.fits` (read in step 3 for in_muse and edge) and `MEGA_CUBE_WITH_VAR_2.fits` (step 8) cover the same footprint.
 - Port `--force-double`, `--cont-side` and `--mask` into `lime_OIII_singlereview.py`.
 - AO gap flag and the edge false-position rejection.
 

@@ -2,417 +2,249 @@
 """
 lya_local_contsub.py
 
-Local median-filter continuum subtraction for the JELS MUSE subcubes.
+Local median-filter continuum subtraction of the MUSE subcubes, for the
+PRIMER + MINERVA z_sys sample (Isaac IDs).
 
-Adapted from the original megacube-extraction pipeline to run on the
-per-source subcubes named  subcube_JELSID_<ID>.fits, keyed by the 'ID'
-column of the input CSV. The source redshift is read from 'z_sys' (falling
-back to 'z_dja' where z_sys is blank), and the continuum-exclusion mask
-defaults to an ASYMMETRIC velocity window about the observed Lya wavelength:
-narrow on the blue side and wide on the red side, since Lya escaping an
-expanding medium emerges redward of systemic.
+For each source the script masks the channels where Lya could fall, estimates
+the continuum of every spaxel with a running median (default 101 channels)
+across the unmasked channels, interpolates it across the mask and any gaps,
+and subtracts it. The mask is an asymmetric velocity window about Lya at
+z_sys, -dv_blue to +dv_red km/s (default -300/+1200), narrow to the blue and
+wide to the red, since Lya escaping an outflow emerges redward of systemic.
 
-For each source the script builds a spectral mask, estimates a per-spaxel
-continuum by median filtering with interpolation across the mask and any
-spectral gaps, subtracts it, writes a continuum cube and a continuum-
-subtracted (line) cube, and saves a QA plot.
+The method is unchanged from the JELS-ID version. What changed
+  - reads jwst_catalogs/primer_minerva_in_muse_zsys.csv, keyed on Isaac's ID,
+    with z_sys for every source (no z_dja fallback)
+  - reads and writes in the per-source folder MUSE_subcubes/<ID>/
+  - Lya is placed at its air wavelength. z_sys is a vacuum redshift and the
+    cube is in air, so 1215.67 (1 + z_sys) sat about 1.4 AA (80 km/s) too red
+  - the QA plot has a second panel, the 0.6 arcsec aperture spectrum at the
+    source zoomed on Lya
+
+Inputs
+------
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv     ID, ra, dec, z_sys
+  MUSE_subcubes/<ID>/<ID>_subcube.fits              extract_subcubes.py
+
+Outputs, all in MUSE_subcubes/<ID>/
+-------
+  <ID>_lya_contsub_cube.fits       continuum-subtracted cube, use this for Lya
+  <ID>_continuum_model_cube.fits   the continuum model, not for Lya
+  <ID>_contsub_QA.png              summed spectrum of the whole subcube (top)
+                                   and the aperture spectrum at Lya (bottom)
+  Both cubes keep the original variance in extension 2.
+
+Sources without a subcube are skipped, so it can be run while only some
+subcubes exist.
+
+Usage
+-----
+python lya_local_contsub.py
+python lya_local_contsub.py --ids 23070 50803
+python lya_local_contsub.py --skip-existing
+python lya_local_contsub.py --dv-blue 300 --dv-red 1200 --window 101
 """
 
 import argparse
 import os
+import time
+
 import numpy as np
-import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-from mpdaf.obj import Cube
-import astropy.units as u
 from scipy.ndimage import median_filter
 from scipy.interpolate import interp1d
 
-# -------------------------
-# Constants
-# -------------------------
-LYA_REST = 1215.67 * u.AA
-C_KMS = 299792.458
+import p2_common as pc
 
-# -------------------------
-# Utilities
-# -------------------------
-
-def z_to_lya_obs(z):
-    return (LYA_REST * (1 + z)).value  # Angstrom
+C_KMS = pc.C_KMS
+APERTURE_ARCSEC = 0.6   # for the QA plot only
 
 
-def velocity_mask(wave, lya_obs, dv_blue=300, dv_red=1200):
-    """Boolean mask, True inside the asymmetric velocity window about lya_obs.
-
-    dv is measured relative to the observed Lya wavelength, so dv < 0 is
-    blueward (shorter wavelength) and dv > 0 is redward (longer wavelength).
-    The window spans -dv_blue to +dv_red, allowing a wide red tail to cover
-    Lya offsets while keeping the blue side tight.
-    """
-    dv = C_KMS * (wave - lya_obs) / lya_obs
-    return (dv > -dv_blue) & (dv < dv_red)
-
-
-def zrange_mask(wave, z_min, z_max, buffer_A=5.0):
-    """Boolean mask, True between observed Lya at z_min and z_max, plus buffer."""
-    lo = z_to_lya_obs(z_min) - buffer_A
-    hi = z_to_lya_obs(z_max) + buffer_A
-    print(f"[MASK] zrange: {lo:.2f}-{hi:.2f} A")
-    print(f" Maximum mask size in A: {hi - lo:.2f}")
-    return (wave >= lo) & (wave <= hi)
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=pc.ZSYS_CATALOG)
+    p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR,
+                   help="folder holding <ID>/<ID>_subcube.fits, outputs go "
+                        "in the same <ID> folders")
+    p.add_argument("--ids", type=int, nargs="+", help="only these IDs")
+    p.add_argument("--skip-existing", action="store_true",
+                   help="leave sources that already have a contsub cube")
+    p.add_argument("--window", type=int, default=101,
+                   help="median filter width in channels (default 101)")
+    p.add_argument("--mask-mode", choices=["none", "velocity"], default="velocity")
+    p.add_argument("--dv-blue", type=float, default=300.0)
+    p.add_argument("--dv-red", type=float, default=1200.0)
+    return p.parse_args()
 
 
-def build_mask(wave, mask_mode, lya_obs=None,
-               z_min=None, z_max=None,
-               dv_blue=300, dv_red=1200, buffer_A=5.0):
-    """Construct the continuum-exclusion mask for the chosen mode.
-
-    mask_mode:
-      'none'     -> no channels excluded (all False)
-      'velocity' -> exclude -dv_blue to +dv_red km/s around lya_obs (default)
-      'zrange'   -> exclude z_min(-buffer) to z_max(+buffer) in Lya-obs space
-    """
+# ----------------------------------------------------------------------
+# Continuum
+# ----------------------------------------------------------------------
+def build_mask(wave, mask_mode, lya_wave, dv_blue, dv_red):
+    """True on the channels EXCLUDED from the continuum estimate."""
     if mask_mode == "none":
         return np.zeros(wave.shape, dtype=bool)
-
-    if mask_mode == "velocity":
-        if lya_obs is None:
-            raise ValueError("velocity mask requires lya_obs")
-        return velocity_mask(wave, lya_obs, dv_blue=dv_blue, dv_red=dv_red)
-
-    if mask_mode == "zrange":
-        if z_min is None or z_max is None:
-            raise ValueError("zrange mask requires z_min and z_max")
-        return zrange_mask(wave, z_min, z_max, buffer_A=buffer_A)
-
-    raise ValueError(f"Unknown mask_mode '{mask_mode}'")
+    lo, hi = pc.velocity_band(lya_wave, dv_blue, dv_red)
+    return (wave > lo) & (wave < hi)
 
 
-def median_continuum_cube(cube, lya_mask, window_pix=101):
-    """Spectral median-filter continuum subtraction with explicit
-    interpolation across the masked region and spectral gaps.
+def median_continuum_cube(data, wave, lya_mask, window_pix=101):
+    """Spectral median-filter continuum with interpolation across the masked
+    region and spectral gaps. data is the flux cube with NaN for bad values.
 
-    lya_mask : 1D boolean array over the spectral axis, True where channels
-               are EXCLUDED from the continuum estimate.
-
-    Spaxels that are entirely non-finite (the NaN margin on edge-padded
-    subcubes) are skipped and left as NaN, so the padding never enters the
-    continuum estimate.
+    Spaxels that are entirely non-finite (the NaN margin of edge-padded
+    subcubes) are skipped and left as NaN.
     """
-    data = cube.data.copy()
     nz, ny, nx = data.shape
-    wave = cube.wave.coord()
-
-    cont = np.full_like(data, np.nan)
+    cont = np.full(data.shape, np.nan, dtype=np.float64)
 
     for iy in range(ny):
         for ix in range(nx):
             spec = data[:, iy, ix]
-
             if not np.any(np.isfinite(spec)):
                 continue
 
-            # valid continuum pixels ONLY
             good = np.isfinite(spec) & (~lya_mask)
-
-            # need enough points to define a continuum
             if good.sum() < window_pix:
                 continue
 
-            # 1) median filter on a mask-filled spectrum
+            # 1) median filter on a spectrum with the masked channels filled
             spec_filled = spec.copy()
             med_val = np.nanmedian(spec[good])
             spec_filled[~good] = med_val
+            cont_med = median_filter(spec_filled, size=window_pix, mode="nearest")
 
-            cont_med = median_filter(
-                spec_filled,
-                size=window_pix,
-                mode="nearest"
-            )
-
-            # 2) interpolate continuum across gaps + masked region
-            cont_good = cont_med[good]
-            wave_good = wave[good]
-
+            # 2) interpolate the continuum across gaps and the masked region
             try:
-                interp = interp1d(
-                    wave_good,
-                    cont_good,
-                    kind="linear",
-                    bounds_error=False,
-                    fill_value="extrapolate"
-                )
+                interp = interp1d(wave[good], cont_med[good], kind="linear",
+                                  bounds_error=False, fill_value="extrapolate")
                 cont[:, iy, ix] = interp(wave)
-
             except Exception:
-                # fallback: flat continuum
                 cont[:, iy, ix] = med_val
 
-    line = data - cont
-    return cont, line
+    return cont, data - cont
 
 
-def plot_QA(cube, cont, line, lya_obs, source_id, outdir, mode_tag,
-            dv_blue=None, dv_red=None):
-    """QA plot using spatially summed spectra."""
+# ----------------------------------------------------------------------
+# QA plot
+# ----------------------------------------------------------------------
+def aperture_mask(ny, nx, x0, y0, radius_pix):
+    yy, xx = np.indices((ny, nx))
+    return np.hypot(xx - x0, yy - y0) <= radius_pix
+
+
+def plot_qa(path, sid, z, wave, data, cont, line, lya_wave, band, src_xy, pixscale):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+    # Top, the whole subcube summed, as before.
+    ax1.plot(wave, np.nansum(data, axis=(1, 2)), color="0.6", lw=0.8, label="Original")
+    ax1.plot(wave, np.nansum(cont, axis=(1, 2)), color="r", lw=0.8, label="Median continuum")
+    ax1.plot(wave, np.nansum(line, axis=(1, 2)), color="k", lw=0.8, label="Continuum-subtracted")
+    ax1.set_title(f"ID {sid}, z_sys = {z:.4f}, whole subcube summed", fontsize=10)
+
+    # Bottom, the 0.6 arcsec aperture at the source, zoomed on Lya.
+    ny, nx = data.shape[1:]
+    ap = aperture_mask(ny, nx, src_xy[0], src_xy[1], APERTURE_ARCSEC / pixscale)
+    zoom = (wave > band[0] - 60) & (wave < band[1] + 60)
+    for arr, col, lab in ((data, "0.6", "Original"), (cont, "r", "Median continuum"),
+                          (line, "k", "Continuum-subtracted")):
+        ax2.step(wave[zoom], np.nansum(arr[zoom][:, ap], axis=1), where="mid",
+                 color=col, lw=0.9, label=lab)
+    ax2.axhline(0, color="0.8", lw=0.6)
+    ax2.set_xlim(wave[zoom].min(), wave[zoom].max())
+    ax2.set_title(f'{APERTURE_ARCSEC}" radius aperture at the source', fontsize=10)
+
+    for ax in (ax1, ax2):
+        ax.axvline(lya_wave, color="b", ls="--", lw=1, label="Lya at z_sys (air)")
+        if band is not None:
+            ax.axvspan(*band, color="b", alpha=0.08, label="masked band")
+        ax.set_xlabel(r"Wavelength (air) [$\AA$]")
+        ax.set_ylabel(r"Flux [$10^{-20}$ erg s$^{-1}$ cm$^{-2}$ $\AA^{-1}$]")
+    ax1.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
+def process_source(row, args):
+    sid = int(row["ID"])
+    z = float(row["z_sys"])
+    sub_path = pc.muse_path(sid, "subcube", args.subcube_dir)
+    line_path = pc.muse_path(sid, "contsub", args.subcube_dir)
+    cont_path = pc.muse_path(sid, "continuum", args.subcube_dir)
+    png_path = pc.muse_path(sid, "contsub_png", args.subcube_dir)
+
+    if not os.path.exists(sub_path):
+        print(f"  {sid}  SKIP no subcube at {sub_path}")
+        return "missing"
+    if args.skip_existing and os.path.exists(line_path):
+        print(f"  {sid}  exists, skipped")
+        return "skipped"
+
+    t0 = time.time()
+    cube = pc.load_muse_cube(sub_path)
     wave = cube.wave.coord()
+    data = cube.data.filled(np.nan).astype(np.float64)
+    pixscale = float(np.mean(cube.wcs.get_step(unit="arcsec")))
 
-    spec = np.nansum(cube.data, axis=(1, 2))
-    cont_spec = np.nansum(cont, axis=(1, 2))
-    line_spec = np.nansum(line, axis=(1, 2))
+    lya_wave = pc.lya_obs_air(z)
+    band = pc.velocity_band(lya_wave, args.dv_blue, args.dv_red) \
+        if args.mask_mode == "velocity" else None
+    mask = build_mask(wave, args.mask_mode, lya_wave, args.dv_blue, args.dv_red)
+    print(f"  {sid}  z_sys {z:.4f}, Lya {lya_wave:.2f} AA (air), "
+          f"{int(mask.sum())} channels masked", flush=True)
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(wave, spec, color="0.6", label="Original")
-    plt.plot(wave, cont_spec, color="r", label="Median continuum")
-    plt.plot(wave, line_spec, color="k", label="Continuum-subtracted")
-    plt.axvline(lya_obs, color="b", ls="--", label="Lya (systemic)")
+    cont, line = median_continuum_cube(data, wave, mask, window_pix=args.window)
 
-    if dv_blue is not None and dv_red is not None:
-        w_blue = lya_obs * (1 - dv_blue / C_KMS)
-        w_red = lya_obs * (1 + dv_red / C_KMS)
-        plt.axvspan(w_blue, w_red, color="b", alpha=0.08,
-                    label=f"mask (-{dv_blue:.0f}/+{dv_red:.0f} km/s)")
-
-    plt.xlabel("Wavelength [Angstrom]")
-    plt.ylabel("Flux *10**-20")
-    plt.title(f"Source {source_id}: median-filter continuum subtraction ({mode_tag})")
-    plt.legend()
-
-    img_dir = os.path.join(outdir, "images")
-    os.makedirs(img_dir, exist_ok=True)
-    plt.savefig(
-        os.path.join(img_dir, f"source_{source_id}_median_contsub_QA_{mode_tag}.png"),
-        dpi=150
-    )
-    plt.close()
-
-
-# -------------------------
-# Main processing
-# -------------------------
-
-def load_cube(cube_path):
-    """Load a subcube, pointing mpdaf at the data and variance extensions.
-
-    The subcubes have the flux in image extension 1 and the variance in
-    extension 2. The primary HDU (index 0) is empty but, because it inherited
-    an EXTNAME='DATA' card from the parent megacube, it shares the name 'DATA'
-    with the real data extension. Selecting by name is therefore ambiguous and
-    mpdaf resolves 'DATA' to the empty primary, raising "cannot manage data
-    with 0 axes". Selecting by integer index avoids the collision.
-
-    Falls back to name-based and default loads so the same function still
-    opens cleanly written cubes that lack the duplicate name.
-    """
-    try:
-        return Cube(cube_path, ext=(1, 2))
-    except Exception:
-        pass
-    try:
-        return Cube(cube_path, ext=1)
-    except Exception:
-        pass
-    try:
-        return Cube(cube_path, ext=("DATA", "STAT"))
-    except Exception:
-        pass
-    return Cube(cube_path)
-
-
-def process_source(cube_path, z, source_id, outdir,
-                   mask_mode="velocity",
-                   z_min=None, z_max=None,
-                   window_pix=101,
-                   dv_blue=300, dv_red=1200,
-                   buffer_A=5.0,
-                   make_plot=True):
-
-    cube = load_cube(cube_path)
-    wave = cube.wave.coord()
-    lya_obs = z_to_lya_obs(z)
-
-    lya_mask = build_mask(
-        wave, mask_mode,
-        lya_obs=lya_obs,
-        z_min=z_min, z_max=z_max,
-        dv_blue=dv_blue, dv_red=dv_red, buffer_A=buffer_A,
-    )
-
-    n_masked = int(lya_mask.sum())
-    if mask_mode == "velocity":
-        print(f"[MASK] {mask_mode}: -{dv_blue:.0f}/+{dv_red:.0f} km/s about "
-              f"{lya_obs:.2f} A ({n_masked} channels excluded)")
-    elif mask_mode == "zrange":
-        lo = z_to_lya_obs(z_min) - buffer_A
-        hi = z_to_lya_obs(z_max) + buffer_A
-        print(f"[MASK] {mask_mode}: {lo:.2f}-{hi:.2f} A "
-              f"({n_masked} channels excluded)")
+    # Source position in the subcube, from the header written by
+    # extract_subcubes.py (1-based), else from the WCS.
+    hdr = cube.primary_header
+    if "SRC_X" in hdr and "SRC_Y" in hdr:
+        src_xy = (hdr["SRC_X"] - 1, hdr["SRC_Y"] - 1)
     else:
-        print(f"[MASK] {mask_mode}: no channels excluded")
+        yx = cube.wcs.sky2pix([[row["dec"], row["ra"]]], unit="deg")[0]
+        src_xy = (yx[1], yx[0])
+    plot_qa(png_path, sid, z, wave, data, cont, line, lya_wave, band, src_xy, pixscale)
 
-    cont, line = median_continuum_cube(
-        cube,
-        lya_mask,
-        window_pix=window_pix,
-    )
+    for path, arr, kind in ((line_path, line, "continuum-subtracted"),
+                            (cont_path, cont, "continuum model")):
+        out = cube.copy()
+        out.data = np.ma.masked_invalid(arr.astype(np.float32))
+        ph = out.primary_header
+        ph["CS_KIND"] = (kind, "lya_local_contsub.py product")
+        ph["CS_MASK"] = (args.mask_mode, "continuum mask mode")
+        ph["CS_DVB"] = (args.dv_blue, "[km/s] mask blue edge about Lya")
+        ph["CS_DVR"] = (args.dv_red, "[km/s] mask red edge about Lya")
+        ph["CS_WIN"] = (args.window, "[channels] median filter width")
+        ph["CS_LYA"] = (round(lya_wave, 3), "[AA, air] Lya at z_sys")
+        out.write(path)
 
-    if make_plot:
-        plot_QA(cube, cont, line, lya_obs, source_id, outdir, mask_mode,
-                dv_blue=dv_blue if mask_mode == "velocity" else None,
-                dv_red=dv_red if mask_mode == "velocity" else None)
-
-    cont_cube = cube.copy()
-    line_cube = cube.copy()
-
-    cont_cube.data[:] = cont
-    line_cube.data[:] = line
-
-    cont_out = os.path.join(
-        outdir, f"source_{source_id}_continuum_cube_{mask_mode}.fits")
-    line_out = os.path.join(
-        outdir, f"source_{source_id}_lya_contsub_cube_{mask_mode}.fits")
-
-    for path, obj in zip([cont_out, line_out], [cont_cube, line_cube]):
-        if os.path.exists(path):
-            os.remove(path)
-        obj.write(path)
-
-    print(f"[OK] Source {source_id} processed ({mask_mode})")
-
-
-# -------------------------
-# CLI
-# -------------------------
-
-def format_id(raw_id):
-    """Match the subcube naming: whole-number IDs render without a .0."""
-    try:
-        fval = float(raw_id)
-        return str(int(fval)) if fval.is_integer() else str(raw_id)
-    except (TypeError, ValueError):
-        return str(raw_id)
+    print(f"         {line_path}\n         {cont_path}\n         {png_path}\n"
+          f"         ({time.time() - t0:.0f} s)", flush=True)
+    return "done"
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", required=True)
-    parser.add_argument("--cube_dir", required=True,
-                        help="Directory holding subcube_JELSID_<ID>.fits.")
-    parser.add_argument("--outdir", required=True)
-    parser.add_argument("--source", default=None,
-                        help="Single source ID (matches the CSV ID column). "
-                             "Omit to process all rows.")
-    parser.add_argument("--window", type=int, default=101)
-    parser.add_argument("--mask_mode", choices=["none", "velocity", "zrange"],
-                        default="velocity",
-                        help="Continuum-exclusion mode (default velocity).")
-    parser.add_argument("--dv_blue", type=float, default=300,
-                        help="Blue half-width in km/s for velocity mode "
-                             "(default 300).")
-    parser.add_argument("--dv_red", type=float, default=1200,
-                        help="Red half-width in km/s for velocity mode "
-                             "(default 1200).")
-    parser.add_argument("--buffer_A", type=float, default=5.0,
-                        help="Buffer in Angstrom per side for zrange mode.")
-    parser.add_argument("--zcol", default="z_sys",
-                        help="CSV column holding the redshift (default z_sys).")
-    parser.add_argument("--zcol_fallback", default="z_dja",
-                        help="CSV column used where zcol is blank/non-finite "
-                             "(default z_dja). Set to '' to disable fallback.")
-    args = parser.parse_args()
+    args = parse_args()
+    print("lya_local_contsub.py")
+    print(f"Reading catalogue   {os.path.abspath(args.catalog)}")
+    df = pc.load_sample(args.catalog, args.ids)
+    print(f"  {len(df)} sources")
+    print(f"Mask {args.mask_mode}, -{args.dv_blue:g}/+{args.dv_red:g} km/s about Lya, "
+          f"median filter {args.window} channels")
+    print(f"Folders             {os.path.abspath(args.subcube_dir)}/<ID>/\n")
 
-    df = pd.read_csv(args.csv)
-
-    for col in ("ID", args.zcol):
-        if col not in df.columns:
-            raise SystemExit(f"CSV missing required column '{col}'.")
-
-    use_fallback = bool(args.zcol_fallback)
-    if use_fallback and args.zcol_fallback not in df.columns:
-        raise SystemExit(
-            f"CSV missing fallback column '{args.zcol_fallback}'. "
-            f"Pass --zcol_fallback '' to disable the fallback.")
-
-    # Select rows by ID, or all rows.
-    if args.source is not None:
-        target = format_id(args.source)
-        rows = df[df["ID"].apply(format_id) == target]
-        if rows.empty:
-            raise SystemExit(f"No row with ID {args.source} in the CSV.")
-    else:
-        rows = df
-
-    for _, row in rows.iterrows():
-        sid = format_id(row["ID"])
-
-        z = pd.to_numeric(row[args.zcol], errors="coerce")
-
-        if not np.isfinite(z) and use_fallback:
-            z_fb = pd.to_numeric(row[args.zcol_fallback], errors="coerce")
-            if np.isfinite(z_fb):
-                print(f"[INFO] Source {sid}: {args.zcol} blank, "
-                      f"falling back to {args.zcol_fallback}={z_fb:.4f}.")
-                z = z_fb
-
-        if not np.isfinite(z):
-            print(f"[WARN] Source {sid}: no finite {args.zcol}"
-                  f"{' or ' + args.zcol_fallback if use_fallback else ''}, "
-                  f"skipping.")
-            continue
-
-        # zrange columns kept optional, only used if mask_mode is zrange.
-        z_min = row["z1_min"] if "z1_min" in df.columns else None
-        z_max = row["z1_max"] if "z1_max" in df.columns else None
-
-        if args.mask_mode == "zrange" and (z_min is None or z_max is None):
-            raise SystemExit(
-                "mask_mode 'zrange' needs z1_min and z1_max in the CSV.")
-
-        cube_path = os.path.join(args.cube_dir, f"subcube_JELSID_{sid}.fits")
-
-        if not os.path.exists(cube_path):
-            print(f"[WARN] Missing cube for source {sid}: {cube_path}")
-            continue
-
-        process_source(
-            cube_path,
-            z,
-            sid,
-            args.outdir,
-            mask_mode=args.mask_mode,
-            z_min=z_min,
-            z_max=z_max,
-            window_pix=args.window,
-            dv_blue=args.dv_blue,
-            dv_red=args.dv_red,
-            buffer_A=args.buffer_A,
-        )
+    status = [process_source(row, args) for _, row in df.iterrows()]
+    print("\n--- Summary ---")
+    for s in ("done", "skipped", "missing"):
+        print(f"  {s:<10} {status.count(s)}")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-"""
-Asymmetric velocity mask (-300/+1200 km/s about Lya at z_sys, z_dja
-fallback), all sources:
-python lya_local_contsub.py \
-  --mask_mode velocity --dv_blue 300 --dv_red 1200 \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --cube_dir /cephfs/apatrick/P2/MUSE_subcubes/ \
-  --outdir /cephfs/apatrick/P2/MUSE_subcubes/contsub
-
-Single source by ID:
-python lya_local_contsub.py \
-  --source 16871 --mask_mode velocity --dv_blue 300 --dv_red 1200 \
-  --csv /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --cube_dir /cephfs/apatrick/P2/MUSE_subcubes/ \
-  --outdir /cephfs/apatrick/P2/MUSE_subcubes/contsub
-
-
-"""

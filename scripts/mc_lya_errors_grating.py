@@ -1,85 +1,67 @@
 #!/usr/bin/env python3
 """
-Monte Carlo uncertainties for the skewed-Gaussian Ly-alpha fits (P2).
+mc_lya_errors_grating.py
 
-Standalone add-on to fit_lya_properties_grating.py. Reads the saved NPZ
-extractions written by ap_extract_specs_grating.py, refits each source N times
-under noise realisations, and records the scatter in the recovered Lya peak
-wavelength, z_lya, line flux and FWHM. It then combines the bootstrap error on
-z_lya with the systemic-redshift error z_sys_err (taken from the catalogue) to
-give a velocity-offset uncertainty, delta_v_err_kms, split into its Lya and
-systemic contributions so it is clear which dominates.
+Monte Carlo uncertainties on the Lya fits from fit_lya_properties_grating.py,
+for the PRIMER + MINERVA z_sys sample.
 
-The fitting itself is imported directly from fit_lya_properties_grating so the
-model, bounds, initial guesses, weighting and fit centre are identical to the
-science run. The fit is centred on best_center from the sliding-S/N CSV, exactly
-as in the science run, so pass the same --snr-csv and --fit-window here.
+The method is unchanged from the JELS-ID version. Each successfully fitted
+spectrum is refitted N times (default 500) under noise realisations, with the
+fitter imported from fit_lya_properties_grating.py and centred on the same
+best_center, so the model, bounds and weighting match the science run. The
+scatter gives errors on the Lya peak, z_lya, flux and FWHM, and the z_lya
+error is combined with z_sys_err for the Delta_v error,
+    delta_v_err_kms = c / (1 + z_sys) x sqrt(sigma_z_lya^2 + z_sys_err^2)
+split into delta_v_err_lya_kms and delta_v_err_sys_kms.
 
-The fit model includes the MUSE LSF (Bacon et al. 2017 polynomial, see
-fit_lya_properties_grating.py), so each refit returns both the intrinsic and
-the observed (LSF-convolved) FWHM. Both get an MC error, fwhm_int_kms_err_mc
-and fwhm_obs_kms_err_mc. frac_unresolved_mc is the fraction of refits in which
-the line is unresolved, a guide to how secure the intrinsic width is. The
-peak used for z_lya follows --peak, which must match the science run.
+  --mode model (default)  realisations are the best-fit model + N(0, sqrt(var)),
+                          a parametric bootstrap
+  --mode data             realisations are the data + N(0, sqrt(var)), which
+                          adds noise to noise and inflates the scatter by
+                          about sqrt(2)
 
-Two noise modes, as in the Paper 1 flux-error add-on, and the distinction
-matters:
+What changed
+  - keyed on Isaac's ID, reads MUSE_catalogs/lya_fits.csv and the spectra in
+    MUSE_subcubes/<ID>/
+  - each source writes its own result, MUSE_subcubes/<ID>/<ID>_lya_mc.csv,
+    then merge_mc_partials.py joins them onto lya_fits.csv
+  - the slurm array indexes the sorted ID list of the sample (--task-index),
+    not the row of the successful fits, so the numbering only changes when
+    the sample does. Tasks whose source has no successful fit exit at once
+  - run without --task-index (all sources, or --ids) it merges at the end
 
-   --mode model  (default, parametric bootstrap)
-      Realisations are best_fit_model + N(0, sqrt(var)). The scatter in the
-      refits estimates the uncertainty on the measured parameters. This is the
-      statistically correct construction.
+Inputs
+------
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv     ID, z_sys, z_sys_err
+  MUSE_catalogs/lya_fits.csv                        fit_success, best_center
+  MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz
 
-   --mode data
-      Realisations are observed_flux + N(0, sqrt(var)). Because the observed
-      spectrum already contains one noise realisation this adds noise on top of
-      noise, inflating the scatter by roughly sqrt(2) in the linear regime. It
-      is conservative rather than wrong, but understand the factor before
-      quoting it.
-
-Running both is cheap and the comparison is a useful check.
-
-delta_v_err_kms = (c / (1 + z_sys)) * sqrt( sigma_z_lya^2 + z_sys_err^2 )
-  delta_v_err_lya_kms = (c / (1 + z_sys)) * sigma_z_lya   (bootstrap)
-  delta_v_err_sys_kms = (c / (1 + z_sys)) * z_sys_err     (catalogue)
-
-Example
+Outputs
 -------
-python mc_lya_errors_grating.py \
-  --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
-  --snr-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --properties-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv \
-  --out-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv \
-  --n-mc 500 --mode model
+  MUSE_subcubes/<ID>/<ID>_lya_mc.csv     one row of MC columns per source
+  MUSE_catalogs/lya_fits_mc.csv          lya_fits.csv plus the MC columns
+                                         (written by the merge)
+
+Usage
+-----
+python mc_lya_errors_grating.py --ids 23070 50803 --n-mc 100    # quick test
+python mc_lya_errors_grating.py                                  # all, one node
+sbatch --array=0-<N-1> slurm/run_mc_lya_errors.slurm             # all, slurm
 """
 
 import argparse
-import glob
 import os
 import sys
 
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import p2_common as pc                      # noqa: E402
+import fit_lya_properties_grating as flp    # noqa: E402
+import merge_mc_partials                    # noqa: E402
 
-def load_fitter(fitter_dir):
-    """Import the fitting machinery from fit_lya_properties_grating.py."""
-    fitter_dir = os.path.abspath(fitter_dir)
-    if fitter_dir not in sys.path:
-        sys.path.insert(0, fitter_dir)
-    import fit_lya_properties_grating as flp
-    return flp
-
-
-def npz_scalar(npz, key, default=np.nan):
-    """Read a scalar stored in an NPZ as a 0-d array."""
-    if key not in npz.files:
-        return default
-    try:
-        return float(np.asarray(npz[key]).item())
-    except (ValueError, TypeError):
-        return default
+FITS_CSV = f"{pc.MUSE_CAT_DIR}/lya_fits.csv"
 
 
 def at_bound(value, low, high, rtol=1e-3):
@@ -217,218 +199,90 @@ def run_mc_for_source(flp, npz_path, centre, z_sys, z_sys_err,
     return out
 
 
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=pc.ZSYS_CATALOG)
+    p.add_argument("--fits-csv", default=FITS_CSV)
+    p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
+    p.add_argument("--ids", type=int, nargs="+", help="only these IDs")
+    p.add_argument("--task-index", type=int, default=None,
+                   help="slurm array index, the Nth ID (0-based) of the sorted "
+                        "sample. Writes that source's file only, no merge")
+    p.add_argument("--n-mc", type=int, default=500)
+    p.add_argument("--mode", choices=["model", "data"], default="model")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--fit-window", type=float, default=25.0,
+                   help="must match the science run")
+    p.add_argument("--sigma-min", type=float, default=flp.SIGMA_MIN_DEFAULT)
+    p.add_argument("--alpha-max", type=float, default=flp.ALPHA_MAX_DEFAULT)
+    p.add_argument("--resolve-frac", type=float, default=flp.RESOLVE_FRAC_DEFAULT)
+    p.add_argument("--peak", choices=["obs", "int"], default=flp.PEAK_DEFAULT)
+    return p.parse_args()
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Monte Carlo uncertainties for P2 Lya skewed-Gaussian fits.")
-    parser.add_argument("--indir",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts",
-                        help="Directory of {ID}_spectrum.npz files.")
-    parser.add_argument("--snr-csv",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv",
-                        help="Sliding-S/N CSV providing best_center per ID.")
-    parser.add_argument("--catalog",
-                        default="/ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv",
-                        help="Catalogue with ID, z_sys, z_sys_err columns.")
-    parser.add_argument("--properties-csv",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv",
-                        help="lya_properties.csv from the science fit run.")
-    parser.add_argument("--out-csv",
-                        default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv",
-                        help="Output CSV with the Monte Carlo columns merged in.")
+    args = parse_args()
+    print("mc_lya_errors_grating.py")
+    print(f"Reading catalogue   {os.path.abspath(args.catalog)}")
+    sample = pc.load_sample(args.catalog, args.ids)
+    fits_path = os.path.abspath(args.fits_csv)
+    print(f"Reading fits        {fits_path}")
+    props = pd.read_csv(fits_path)
+    props["ID"] = props["ID"].astype(int)
+    props = props.set_index("ID")
+    print(f"mode {args.mode}, N = {args.n_mc}, seed {args.seed}, fit +/-{args.fit_window:g} AA, "
+          f"peak {args.peak}")
 
-    parser.add_argument("--id-col", default="ID")
-    parser.add_argument("--z-col", default="z_sys")
-    parser.add_argument("--z-col-fallback", default="z_dja")
-    parser.add_argument("--z-err-col", default="z_sys_err",
-                        help="Catalogue column with the systemic-redshift error.")
-
-    parser.add_argument("--n-mc", type=int, default=500,
-                        help="Number of noise realisations per source.")
-    parser.add_argument("--mode", choices=["model", "data"], default="model",
-                        help="Perturb the best-fit model (default) or the "
-                             "observed spectrum.")
-    parser.add_argument("--fit-window", type=float, default=25.0,
-                        help="Must match the science run (default 25).")
-    parser.add_argument("--sigma-min", type=float, default=None,
-                        help="Must match the science run. Default is the "
-                             "fitter's SIGMA_MIN_DEFAULT (0.1 AA, intrinsic).")
-    parser.add_argument("--alpha-max", type=float, default=None,
-                        help="Must match the science run. Default is the "
-                             "fitter's ALPHA_MAX_DEFAULT (15).")
-    parser.add_argument("--resolve-frac", type=float, default=None,
-                        help="Must match the science run. Default is the "
-                             "fitter's RESOLVE_FRAC_DEFAULT (0.5).")
-    parser.add_argument("--peak", choices=["obs", "int"], default=None,
-                        help="Must match the science run. Default is the "
-                             "fitter's PEAK_DEFAULT ('obs').")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed for reproducibility.")
-    parser.add_argument("--row-index", type=int, default=None,
-                        help="Process only the Nth successfully-fitted source "
-                             "(0-based). Used by the SLURM array so each task "
-                             "does one source. In this mode the script writes a "
-                             "one-row partial CSV to --out-csv and does not "
-                             "merge; a separate merge step combines the partials. "
-                             "Omit to process all sources and write the merged "
-                             "CSV as usual.")
-    parser.add_argument("--fitter-dir", default=None,
-                        help="Directory holding fit_lya_properties_grating.py. "
-                             "Defaults to this script's directory.")
-    args = parser.parse_args()
-
-    fitter_dir = args.fitter_dir or os.path.dirname(os.path.abspath(__file__))
-    flp = load_fitter(fitter_dir)
-    if args.sigma_min is None:
-        args.sigma_min = flp.SIGMA_MIN_DEFAULT
-    if args.alpha_max is None:
-        args.alpha_max = flp.ALPHA_MAX_DEFAULT
-    if args.resolve_frac is None:
-        args.resolve_frac = flp.RESOLVE_FRAC_DEFAULT
-    if args.peak is None:
-        args.peak = flp.PEAK_DEFAULT
-
-    print("[CONFIG]")
-    print(f"  Spectra directory : {os.path.abspath(args.indir)}")
-    print(f"  Sliding-S/N CSV   : {os.path.abspath(args.snr_csv)}")
-    print(f"  Catalogue         : {os.path.abspath(args.catalog)}")
-    print(f"  Properties CSV    : {os.path.abspath(args.properties_csv)}")
-    print(f"  Output CSV        : {os.path.abspath(args.out_csv)}")
-    print(f"  Fitter            : {os.path.join(os.path.abspath(fitter_dir), 'fit_lya_properties_grating.py')}")
-    print(f"  mode = {args.mode}, N = {args.n_mc}, seed = {args.seed}")
-    print(f"  sigma_min = {args.sigma_min} AA, alpha_max = {args.alpha_max}, "
-          f"resolve_frac = {args.resolve_frac}, peak = {args.peak}")
-    print("")
-
-    # Catalogue: z_sys (with fallback) and z_sys_err
-    catalog = pd.read_csv(args.catalog)
-    for col in (args.id_col, args.z_col):
-        if col not in catalog.columns:
-            raise KeyError(
-                f"Column '{col}' not found in catalogue. Available: {list(catalog.columns)}")
-    use_fallback = bool(args.z_col_fallback) and args.z_col_fallback in catalog.columns
-    has_zerr = args.z_err_col in catalog.columns
-    if not has_zerr:
-        print(f"[WARN] catalogue has no '{args.z_err_col}' column, the systemic "
-              f"error term will be NaN and delta_v_err_kms will hold the Lya "
-              f"term alone.")
-    catalog[args.id_col] = catalog[args.id_col].astype("Int64")
-    catalog = catalog.set_index(args.id_col)
-
-    # Sliding-S/N best_center per ID
-    snr = pd.read_csv(args.snr_csv)
-    if "ID" not in snr.columns or "best_center" not in snr.columns:
-        raise KeyError("Sliding-S/N CSV must have ID and best_center columns.")
-    snr["ID"] = snr["ID"].astype("Int64")
-    best_center_by_id = snr.set_index("ID")["best_center"].to_dict()
-
-    # Which sources to bootstrap: those in the properties CSV
-    props = pd.read_csv(args.properties_csv)
-    success = props["fit_success"].astype(str).str.lower().isin(["true", "1"])
-    todo = props[success].reset_index(drop=True)
-    n_success = len(todo)
-    print(f"[INFO] {n_success} successfully-fitted sources to bootstrap")
-
-    single_mode = args.row_index is not None
-    if single_mode:
-        if args.row_index < 0 or args.row_index >= n_success:
-            print(f"[INFO] row-index {args.row_index} out of range "
-                  f"(0..{n_success - 1}), nothing to do for this task.")
+    if args.task_index is not None:
+        if not 0 <= args.task_index < len(sample):
+            print(f"Task index {args.task_index} is past the {len(sample)} sources, nothing to do")
             return
-        todo = todo.iloc[[args.row_index]]
-        print(f"[INFO] SLURM array mode: processing row {args.row_index} "
-              f"(ID {int(todo.iloc[0]['ID'])}) only")
+        sample = sample.iloc[[args.task_index]]
+        print(f"Task {args.task_index}, ID {int(sample.iloc[0]['ID'])}")
     print("")
 
-    records = []
-
-    for _, prow in todo.iterrows():
-        idx = int(prow["ID"])
-        # Per-source seed so array tasks are independent yet reproducible
-        rng = np.random.default_rng(args.seed + idx)
-        npz_path = os.path.join(args.indir, f"{idx}_spectrum.npz")
+    n_done = 0
+    for _, row in sample.iterrows():
+        sid = int(row["ID"])
+        if sid not in props.index:
+            print(f"  {sid}  SKIP not in {os.path.basename(fits_path)}")
+            continue
+        prow = props.loc[sid]
+        if str(prow["fit_success"]).lower() not in ("true", "1"):
+            print(f"  {sid}  SKIP fit failed")
+            continue
+        npz_path = pc.muse_path(sid, "spectrum", args.subcube_dir)
         if not os.path.exists(npz_path):
-            print(f"[WARN] missing extraction for ID {idx}, skipping")
+            print(f"  {sid}  SKIP no spectrum at {npz_path}")
             continue
 
-        if idx not in catalog.index:
-            print(f"[WARN] ID {idx} not in catalogue, skipping")
-            continue
+        z_sys = float(row["z_sys"])
+        z_sys_err = float(row["z_sys_err"]) if "z_sys_err" in row and pd.notna(row["z_sys_err"]) else np.nan
+        rng = np.random.default_rng(args.seed + sid)
+        res = run_mc_for_source(flp, npz_path, float(prow["best_center"]), z_sys, z_sys_err,
+                                args.n_mc, args.fit_window, args.sigma_min, args.alpha_max,
+                                args.mode, rng, args.resolve_frac, args.peak)
+        res = {"ID": sid, **res, "mc_mode": args.mode}
 
-        z_sys, _ = flp.resolve_redshift(
-            catalog.loc[idx], args.z_col,
-            args.z_col_fallback if use_fallback else "")
-        z_sys_err = (pd.to_numeric(catalog.loc[idx].get(args.z_err_col),
-                                   errors="coerce") if has_zerr else np.nan)
+        rep, orig = res["lya_peak_repeat"], float(prow["lya_peak_wave"])
+        if np.isfinite(rep) and np.isfinite(orig) and abs(rep - orig) > 1e-3:
+            print(f"  {sid}  WARNING refit peak {rep:.3f} differs from lya_fits.csv "
+                  f"{orig:.3f}, check the fit settings match the science run")
 
-        centre = best_center_by_id.get(idx, np.nan)
-        if not np.isfinite(centre):
-            centre = float(prow.get("best_center", np.nan))
+        out = pc.muse_path(sid, "mc", args.subcube_dir)
+        pd.DataFrame([res]).to_csv(out, index=False)
+        n_done += 1
+        print(f"  {sid}  dv_err {res['delta_v_err_kms']:.1f} km/s (Lya "
+              f"{res['delta_v_err_lya_kms']:.1f}, sys {res['delta_v_err_sys_kms']:.1f}), "
+              f"{res['n_mc_success']}/{args.n_mc} refits converged\n         {out}", flush=True)
 
-        res = run_mc_for_source(
-            flp, npz_path, centre, z_sys, z_sys_err,
-            args.n_mc, args.fit_window, args.sigma_min, args.alpha_max,
-            args.mode, rng, args.resolve_frac, args.peak,
-        )
-        res["ID"] = idx
-
-        # Check the unperturbed refit reproduces the science peak
-        repeat = res["lya_peak_repeat"]
-        original = float(prow.get("lya_peak_wave", np.nan))
-        if np.isfinite(repeat) and np.isfinite(original) and original != 0:
-            drift = abs(repeat - original) / abs(original)
-            if drift > 1e-4:
-                print(f"[WARN] ID {idx}: refit peak differs from science run by "
-                      f"{1e4 * drift:.1f}e-4 frac, check fit-window/sigma/"
-                      f"alpha/peak match the science run")
-
-        records.append(res)
-        print(f"  ID {idx}: dv_err = {res['delta_v_err_kms']:.1f} km/s "
-              f"(Lya {res['delta_v_err_lya_kms']:.1f}, "
-              f"sys {res['delta_v_err_sys_kms']:.1f}), "
-              f"{res['n_mc_success']}/{args.n_mc} fits converged")
-
-    mc = pd.DataFrame(records)
-
-    if single_mode:
-        # Write a one-row partial with the MC columns (plus ID). The merge step
-        # combines all partials and joins them onto the properties CSV.
-        os.makedirs(os.path.dirname(os.path.abspath(args.out_csv)), exist_ok=True)
-        mc.to_csv(args.out_csv, index=False)
+    print(f"\n{n_done} sources done")
+    if args.task_index is None:
         print("")
-        print(f"[INFO] written partial {os.path.abspath(args.out_csv)}")
-        return
-
-    merged = props.merge(mc, on="ID", how="left")
-    os.makedirs(os.path.dirname(os.path.abspath(args.out_csv)), exist_ok=True)
-    merged.to_csv(args.out_csv, index=False)
-    print("")
-    print(f"[INFO] written {os.path.abspath(args.out_csv)}")
-
-    # Summary of which term dominates the velocity error
-    valid = merged[np.isfinite(merged["delta_v_err_kms"])]
-    if len(valid):
-        med = float(np.nanmedian(valid["delta_v_err_kms"]))
-        med_lya = float(np.nanmedian(valid["delta_v_err_lya_kms"]))
-        med_sys = float(np.nanmedian(valid["delta_v_err_sys_kms"]))
-        print("")
-        print("=" * 68)
-        print(f"N sources with delta_v_err : {len(valid)}")
-        print(f"median delta_v_err_kms     : {med:.1f} km/s")
-        print(f"median Lya term            : {med_lya:.1f} km/s")
-        print(f"median systemic term       : {med_sys:.1f} km/s")
-        print("=" * 68)
+        merge_mc_partials.merge(fits_path, args.subcube_dir)
 
 
 if __name__ == "__main__":
     main()
-
-
-"""
-python mc_lya_errors_grating.py \
-  --indir /ceph/cephfs/apatrick/P2/MUSE_subcubes/dataproducts \
-  --snr-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_sliding_snr_grating.csv \
-  --catalog /ceph/cephfs/apatrick/P2/jwst_catalogs/grating_sources_with_zsys.csv \
-  --properties-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties.csv \
-  --out-csv /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv \
-  --n-mc 500 --mode model
-"""
