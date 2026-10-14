@@ -63,7 +63,11 @@ MUSE_FILES = {
     "false_pos": "false_positions.csv",         # false_pos_grating.py
     "false_pos_png": "false_positions.png",
     "false_snr": "false_optimal_snr.csv",       # optimize_lya_positions_f_grating.py
+    "systemic_panels_png": "lya_systemic_panels.png",    # plot_lya_vs_systemic.py
+    "systemic_overlay_png": "lya_systemic_overlay.png",
 }
+
+LYA_CATALOG = f"{MUSE_CAT_DIR}/lya_catalog.csv"   # build_lya_catalog.py
 
 FALSE_POS_SOURCES = f"{MUSE_CAT_DIR}/lya_false_pos_sources.csv"   # manifest
 

@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 """
-Science plots for one manually labelled Lya group (a, b, c or d), or all four.
+plot_lya_science.py
+
+Science plots for the Lya detections and non-detections of the z_sys sample.
+A source is a detection if the chosen flag in lya_catalog.csv is 1 and a
+non-detection if it is 0 (--detection, default det_98, the pooled 98th
+percentile of the false-position S/N). Sources not tested (lya_status not
+ok, e.g. 65863 in the AO gap) are in neither.
+
+Every plot is made once for each set and the flag and set are in the file
+name, e.g. det_98_detections_dv_vs_fwhm.png and
+det_95_non_detections_dv_vs_fwhm.png, so plots for different thresholds sit
+side by side without overwriting each other. For non-detections Delta_v and
+FWHM come from fits to low-S/N spectra, so treat them as a check rather than
+as measurements.
+
+Close pairs (close_pair_group > 0 in lya_catalog.csv) are left out by default
+until the pair decisions are made. --close-pairs include keeps them.
 
 Reads
 -----
-  lya_group_<label>.csv              from group_by_manual.py, used only for
-                                     the list of IDs in the group
-  delta_v_from_best_zsys_line.csv    z_sys, delta_v_kms, delta_v_err_kms,
-                                     merged on ID
-  lya_properties_mc.csv              fwhm_int_kms, fwhm_obs_kms, their MC
-                                     errors, fwhm_lsf_kms and resolved,
-                                     merged on ID
-  muv_beta_by_JELS_ID.csv            M_UV, M_UV_err, merged on ID (from
-                                     fit_muv_beta.py). Only M_UV with
-                                     fit_flag == ok and M_UV_err < --muv-max-err
-                                     is used. Other sources keep their FWHM and
-                                     dv but drop out of the M_UV plots.
+  MUSE_catalogs/lya_catalog.csv     ID, z_sys, delta_v, delta_v_err, the
+                                    det_* flags, lya_status, close_pair_group,
+                                    muv_fit, muv_fit_err (build_lya_catalog.py)
+  MUSE_catalogs/lya_fits_mc.csv     fwhm_int_kms, fwhm_obs_kms, their MC
+                                    errors, fwhm_lsf_kms, resolved
 
-Writes to --outdir, every name prefixed group_<label>_
-------------------------------------------------------
-Plots ending _zbins use three redshift bins (--z-edges, default 3.5 4.5).
-Every one of them also has a _zbins2 version with two bins split at
---z-split (default 3.5).
+M_UV is the photometric muv_fit (fit_muv_beta.py). Only values with
+muv_fit_err < --muv-max-err (0.5) are used. Sources without one keep their
+FWHM and Delta_v but drop out of the M_UV plots.
+
+Writes to --outdir, every name prefixed <flag>_<set>_
+-------------------------------------------------------
+<set> is detections or non_detections. Plots ending _zbins use three redshift
+bins (--z-edges, default 3.5 4.5) and each has a _zbins2 version with two bins
+split at --z-split (default 3.5).
 
   hist_fwhm.png, hist_z.png, hist_dv.png, hist_muv.png
                             distributions
@@ -36,33 +49,28 @@ Every one of them also has a _zbins2 version with two bins split at
                             Fig. 6, each curve peaks at its median. The Mason
                             curves use the median M_UV and median z_sys of the
                             sources in the plot.
-  fwhm_models_zbins[2].png  the same, split by redshift, Mason curves at each
-                            bin's median M_UV and z_sys
-  fwhm_models_muvbins2.png  the same, split into two M_UV bins at the sample
-                            median M_UV (or --muv-edges2)
-  fwhm_models_muvbins3.png  the same, three M_UV bins at the sample tertiles
-                            (or --muv-edges3)
+  fwhm_models_zbins[2].png  the same, split by redshift
+  fwhm_models_muvbins2.png  the same, two M_UV bins at the median M_UV (or
+                            --muv-edges2)
+  fwhm_models_muvbins3.png  the same, three M_UV bins at the tertiles (or
+                            --muv-edges3)
   dv_vs_fwhm_verhamme.png   Delta_v against FWHM with the Verhamme+18 relation
                             (1 sigma band) and the 1:1 line
   dv_vs_fwhm_verhamme_zbins[2].png  the same, split by redshift
-  dv_vs_muv.png             Delta_v against M_UV, coloured by z_sys, with the
-                            Mason+18 relation drawn at integer z across the
-                            sample (cf. Prieto-Lyon+25 Fig. 7 right)
+  dv_vs_muv.png             Delta_v against M_UV with Mason+18 at integer z
+                            (cf. Prieto-Lyon+25 Fig. 7 right)
   dv_vs_muv_zbins[2].png    the same, split by redshift, Mason+18 at each bin's
                             median z with its 0.24 dex scatter
-  fwhm_vs_muv.png           FWHM against M_UV, coloured by z_sys, with Mason+19
-                            at integer z and the Prieto-Lyon+25 median
-                            (cf. Prieto-Lyon+25 Fig. 7 left)
-  fwhm_vs_muv_zbins[2].png  the same, split by redshift, Mason+19 at each bin's
-                            median z with its 0.30 dex scatter
+  fwhm_vs_muv.png           FWHM against M_UV with Mason+19 at integer z and
+                            the Prieto-Lyon+25 median (cf. their Fig. 7 left)
+  fwhm_vs_muv_zbins[2].png  the same, split by redshift
 
 FWHM and the MUSE line spread function
 --------------------------------------
 FWHM is the intrinsic width, corrected for the MUSE LSF by forward modelling
 in fit_lya_properties_grating.py (--fwhm-kind int, the default).
 --fwhm-kind obs plots the observed, LSF-convolved width instead, and every
-output name then gains an obs_ tag (group_a_obs_dv_vs_fwhm.png) so nothing
-is overwritten.
+name then gains an obs_ tag (det_98_detections_obs_dv_vs_fwhm.png).
 
 Lines MUSE does not resolve get an intrinsic FWHM upper limit of
 --resolve-frac x FWHM_LSF (default 0.5, matching the fitter). They are drawn
@@ -77,18 +85,15 @@ Which width matches each literature curve
 
 --muv fixes the M_UV used for the Mason curves instead of the sample median.
 --density-scaling adds the Prieto-Lyon+25 (1+z)^(2/3) scaled Mason+19 curve.
---label all runs every group whose CSV exists.
-
-Histogram bin widths are fixed (--fwhm-bin, --dv-bin, --z-bin) and shared
-across panels so the bins can be compared directly.
-
-FWHM is the observed width of the skewed-Gaussian fit, not corrected for the
-MUSE line spread function.
+Histogram bin widths are fixed (--fwhm-bin, --dv-bin, --z-bin, --muv-bin) and
+shared across panels.
 
 Usage
 -----
-python plot_lya_science.py --label a
-python plot_lya_science.py --label all
+python plot_lya_science.py                       # det_98, both sets
+python plot_lya_science.py --detection det_95
+python plot_lya_science.py --detection 99.5 --sets detections
+python plot_lya_science.py --fwhm-kind obs
 """
 
 import argparse
@@ -107,7 +112,10 @@ try:
 except ImportError:
     _HAVE_CMASHER = False
 
-LABELS = ["a", "b", "c", "d"]
+import p2_common as pc
+
+LYA_CATALOG = getattr(pc, "LYA_CATALOG", f"{pc.MUSE_CAT_DIR}/lya_catalog.csv")
+SETS = {"detections": 1, "non_detections": 0}
 
 # ---------------------------------------------------------------------------
 # Matplotlib style, MNRAS (matched to the P1 figures)
@@ -173,33 +181,51 @@ def panel_width(n):
 # Data
 # ---------------------------------------------------------------------------
 
-def load_group(group_csv, delta_v_csv, properties_csv, muv_csv, muv_max_err,
-               fwhm_kind="int", resolve_frac=0.5):
-    """IDs from the group CSV, every value refreshed from the pipeline.
+def normalise_flag(flag):
+    """'98', '98.0', 'det_98' -> 'det_98'; '99.5' -> 'det_99_5'."""
+    f = str(flag).strip().lower()
+    if f.startswith("det_"):
+        return f
+    return "det_" + f"{float(f):g}".replace(".", "_")
+
+
+def load_sample(catalog_csv, fits_csv, flag, fwhm_kind="int", resolve_frac=0.5,
+                muv_max_err=0.5):
+    """Every tested source with its Lya fit and photometric M_UV.
 
     Adds 'fwhm' and 'fwhm_err' holding the chosen kind (int or obs), a boolean
     'resolved', and M_UV. Unresolved intrinsic widths are replaced by the
-    upper limit resolve_frac x FWHM_LSF.
+    upper limit resolve_frac x FWHM_LSF. Uses the column names the plotting
+    functions expect (delta_v_kms, M_UV).
     """
-    grp = pd.read_csv(group_csv)[["ID"]]
-    grp["ID"] = grp["ID"].astype(int)
-
-    dv = pd.read_csv(delta_v_csv)[["ID", "z_sys", "delta_v_kms",
-                                   "delta_v_err_kms"]]
-    dv["ID"] = dv["ID"].astype(int)
+    cat = pd.read_csv(catalog_csv)
+    cat["ID"] = cat["ID"].astype(int)
+    need = ["ID", "z_sys", "delta_v", "delta_v_err", flag, "lya_status"]
+    missing = [c for c in need if c not in cat.columns]
+    if missing:
+        raise SystemExit(f"{catalog_csv} has no {missing}. Rerun build_lya_catalog.py"
+                         + (f" with --levels including {flag[4:].replace('_', '.')}"
+                            if flag in missing else ""))
+    for c in ("close_pair_group", "muv_fit", "muv_fit_err"):
+        if c not in cat.columns:
+            print(f"  WARNING {c} not in {catalog_csv}, rerun build_lya_catalog.py")
+            cat[c] = 0 if c == "close_pair_group" else np.nan
+    cat = cat.rename(columns={"delta_v": "delta_v_kms",
+                              "delta_v_err": "delta_v_err_kms",
+                              "muv_fit": "M_UV", "muv_fit_err": "M_UV_err",
+                              flag: "det"})
 
     need = ["ID", f"fwhm_{fwhm_kind}_kms", f"fwhm_{fwhm_kind}_kms_err_mc",
             "resolved", "fwhm_lsf_kms"]
-    props = pd.read_csv(properties_csv)
+    props = pd.read_csv(fits_csv)
     missing = [c for c in need if c not in props.columns]
     if missing:
-        raise KeyError(f"{missing} not in {properties_csv}. Rerun the LSF "
-                       f"version of fit_lya_properties_grating.py and "
-                       f"mc_lya_errors_grating.py first.")
-    props = props[need]
+        raise SystemExit(f"{missing} not in {fits_csv}. Run "
+                         "fit_lya_properties_grating.py and the MC merge first")
+    props = props[need].copy()
     props["ID"] = props["ID"].astype(int)
 
-    df = grp.merge(dv, on="ID", how="left").merge(props, on="ID", how="left")
+    df = cat.merge(props, on="ID", how="left")
     df["fwhm"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms"], errors="coerce")
     df["fwhm_err"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms_err_mc"],
                                    errors="coerce")
@@ -212,21 +238,12 @@ def load_group(group_csv, delta_v_csv, properties_csv, muv_csv, muv_max_err,
         df.loc[~df["resolved"], "fwhm"] = lim[~df["resolved"]]
         df.loc[~df["resolved"], "fwhm_err"] = np.nan
 
-    if muv_csv and os.path.exists(muv_csv):
-        m = pd.read_csv(muv_csv)
-        m["ID"] = m["ID"].astype(int)
-        good = (m["fit_flag"] == "ok") & (m["M_UV_err"] < muv_max_err)
-        m.loc[~good, ["M_UV", "M_UV_err"]] = np.nan
-        df = df.merge(m[["ID", "M_UV", "M_UV_err"]].drop_duplicates("ID"),
-                      on="ID", how="left")
-    else:
-        print(f"[WARN] M_UV csv not found ({muv_csv}), M_UV plots will be empty")
-        df["M_UV"] = np.nan
-        df["M_UV_err"] = np.nan
-
-    for col in ("z_sys", "fwhm", "fwhm_err",
-                "delta_v_kms", "delta_v_err_kms", "M_UV", "M_UV_err"):
+    for col in ("z_sys", "fwhm", "fwhm_err", "delta_v_kms", "delta_v_err_kms",
+                "M_UV", "M_UV_err", "det", "close_pair_group"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    bad_muv = ~(df["M_UV_err"] < muv_max_err)
+    df.loc[bad_muv, ["M_UV", "M_UV_err"]] = np.nan
+    df["close_pair_group"] = df["close_pair_group"].fillna(0).astype(int)
     return df
 
 
@@ -591,7 +608,10 @@ def plot_fwhm_models_bins(df, masks, labels, muv_fixed, muv_fallback,
     axes[0].set_ylabel("N")
     axes[0].set_xlim(0, xmax)
     axes[0].set_xticks(np.arange(0, xmax, 200))
-    axes[-1].legend(frameon=False, loc="upper right", fontsize=5.5)
+    for ax in axes[::-1]:          # legend on the last panel that has curves
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(frameon=False, loc="upper right", fontsize=5.5)
+            break
     fig.suptitle(suptitle, fontsize=9, y=1.10)
     fig.subplots_adjust(wspace=0.08)
     save(fig, path)
@@ -782,118 +802,76 @@ def plot_vs_muv_zbins(df, quantity, edges, path, title):
 # ---------------------------------------------------------------------------
 
 def parse_args():
-    p = argparse.ArgumentParser(
-        description="Science plots for one manually labelled Lya group.")
-    p.add_argument("--label", default="a",
-                   help="Manual group label to plot (a, b, c, d), or 'all'. Default a.")
-    p.add_argument("--group-dir",
-                   default="/ceph/cephfs/apatrick/P2/MUSE_catalogs",
-                   help="Directory holding lya_group_<label>.csv.")
-    p.add_argument("--delta-v-csv",
-                   default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/delta_v_from_best_zsys_line.csv")
-    p.add_argument("--properties-csv",
-                   default="/ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_properties_mc.csv")
-    p.add_argument("--muv-csv",
-                   default="/ceph/cephfs/apatrick/P2/jwst_catalogs/muv_beta_by_JELS_ID.csv")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--detection", default="det_98",
+                   help="flag in lya_catalog.csv that defines a detection, "
+                        "e.g. det_98 (default), det_95, 99.5")
+    p.add_argument("--sets", nargs="+", choices=list(SETS), default=list(SETS),
+                   help="which sets to plot (default both)")
+    p.add_argument("--close-pairs", choices=["exclude", "include"], default="exclude",
+                   help="leave out close-pair sources (default) or keep them")
+    p.add_argument("--catalog", default=LYA_CATALOG)
+    p.add_argument("--fits-csv", default=f"{pc.MUSE_CAT_DIR}/lya_fits_mc.csv")
+    p.add_argument("--outdir", default=f"{pc.P2_ROOT}/plots/lya_science")
     p.add_argument("--fwhm-kind", choices=["int", "obs"], default="int",
-                   help="Plot the intrinsic, LSF-corrected FWHM (int, default) "
-                        "or the observed FWHM (obs). obs outputs get an obs_ tag.")
+                   help="intrinsic, LSF-corrected FWHM (int, default) or the "
+                        "observed FWHM (obs). obs outputs get an obs_ tag.")
     p.add_argument("--resolve-frac", type=float, default=0.5,
-                   help="Unresolved lines get an intrinsic FWHM upper limit of "
+                   help="unresolved lines get an intrinsic FWHM upper limit of "
                         "this x FWHM_LSF. Match the fitter (default 0.5).")
     p.add_argument("--muv-max-err", type=float, default=0.5,
-                   help="Only use M_UV with M_UV_err below this. Default 0.5.")
-    p.add_argument("--outdir", default="/ceph/cephfs/apatrick/P2/plots")
-    p.add_argument("--z-edges", type=float, nargs=2, default=[3.5, 4.5],
-                   help="Edges of the three redshift bins. Default 3.5 4.5.")
-    p.add_argument("--z-split", type=float, default=3.5,
-                   help="Edge of the two redshift bins (_zbins2 plots). Default 3.5.")
-    p.add_argument("--muv-edges2", type=float, nargs=1, default=None,
-                   help="Edge of the two M_UV bins. Default: sample median.")
-    p.add_argument("--muv-edges3", type=float, nargs=2, default=None,
-                   help="Edges of the three M_UV bins. Default: sample tertiles.")
-    p.add_argument("--fwhm-bin", type=float, default=50.0,
-                   help="FWHM histogram bin width, km/s. Default 50.")
-    p.add_argument("--dv-bin", type=float, default=100.0,
-                   help="Velocity offset histogram bin width, km/s. Default 100.")
-    p.add_argument("--muv-bin", type=float, default=0.25,
-                   help="M_UV histogram bin width, mag. Default 0.25.")
+                   help="only use M_UV with muv_fit_err below this (default 0.5)")
+    p.add_argument("--z-edges", type=float, nargs=2, default=[3.5, 4.5])
+    p.add_argument("--z-split", type=float, default=3.5)
+    p.add_argument("--muv-edges2", type=float, nargs=1, default=None)
+    p.add_argument("--muv-edges3", type=float, nargs=2, default=None)
+    p.add_argument("--fwhm-bin", type=float, default=50.0)
+    p.add_argument("--dv-bin", type=float, default=100.0)
+    p.add_argument("--muv-bin", type=float, default=0.25)
+    p.add_argument("--z-bin", type=float, default=0.2)
     p.add_argument("--muv", type=float, default=None,
-                   help="Fix the M_UV used for the Mason FWHM curves. Default: "
-                        "the median M_UV of the sources in each plot or bin.")
-    p.add_argument("--fwhm-model-max", type=float, default=800.0,
-                   help="Upper FWHM limit for the model-comparison plots, km/s.")
-    p.add_argument("--fwhm-log-bin", type=float, default=0.1,
-                   help="Bin width in dex for the model-comparison "
-                        "histograms. Default 0.1.")
-    p.add_argument("--n-boot", type=int, default=2000,
-                   help="Bootstrap draws for the log-normal fit band.")
-    p.add_argument("--density-scaling", action="store_true",
-                   help="Also draw Mason+19 scaled by [(1+z)/3]^(2/3).")
+                   help="fix the M_UV used for the Mason curves")
+    p.add_argument("--fwhm-model-max", type=float, default=800.0)
+    p.add_argument("--fwhm-log-bin", type=float, default=0.1)
+    p.add_argument("--n-boot", type=int, default=2000)
+    p.add_argument("--density-scaling", action="store_true")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--z-bin", type=float, default=0.2,
-                   help="Redshift histogram bin width. Default 0.2.")
     return p.parse_args()
 
 
-def run_group(label, args):
-    group_csv = os.path.abspath(os.path.join(args.group_dir, f"lya_group_{label}.csv"))
-    delta_v_path = os.path.abspath(args.delta_v_csv)
-    properties_path = os.path.abspath(args.properties_csv)
-    muv_path = os.path.abspath(args.muv_csv)
-    outdir = os.path.abspath(args.outdir)
+def run_set(df, name, flag, args, outdir):
+    """Every plot for one set (detections or non_detections)."""
     edges3 = list(args.z_edges)
     edges2 = [args.z_split]
+    zsets = [(edges3, "zbins"), (edges2, "zbins2")]
+    kind_tag = "" if args.fwhm_kind == "int" else "obs_"
+    stem = os.path.join(outdir, f"{flag}_{name}_{kind_tag}")
+    title = f"{flag} {name.replace('_', '-')}"
 
-    print("[CONFIG]")
-    print(f"  group           {label}")
-    print(f"  group csv       {group_csv}")
-    print(f"  delta_v csv     {delta_v_path}")
-    print(f"  properties csv  {properties_path}")
-    print(f"  M_UV csv        {muv_path}  (M_UV_err < {args.muv_max_err:g})")
-    print(f"  FWHM kind       {args.fwhm_kind} "
-          f"({'LSF corrected' if args.fwhm_kind == 'int' else 'observed, not LSF corrected'})")
-    print(f"  output dir      {outdir}")
-    print(f"  z bins          three: {edges3[0]:g}, {edges3[1]:g}   two: {edges2[0]:g}")
-    print("")
-
-    if not os.path.exists(group_csv):
-        print(f"[SKIP] {group_csv} not found. Run group_lya_by_manual.py first.\n")
-        return
-
-    df = load_group(group_csv, delta_v_path, properties_path, muv_path,
-                    args.muv_max_err, args.fwhm_kind, args.resolve_frac)
-    n_no_z = int(df["z_sys"].isna().sum())
+    n_fit = int(df["delta_v_kms"].notna().sum())
     n_muv = int(df["M_UV"].notna().sum())
-    print(f"[INFO] {len(df)} sources in group {label}, {n_muv} with a usable M_UV")
-    n_unres = int((~df["resolved"]).sum())
-    if n_unres:
-        print(f"[INFO] {n_unres} unresolved lines (FWHM upper limit): "
-              f"{df.loc[~df['resolved'], 'ID'].tolist()}")
-    if n_no_z:
-        print(f"[WARN] {n_no_z} sources have no z_sys and are left out of "
-              f"the redshift-split and coloured plots")
+    print(f"\n[{flag} {name}] {len(df)} sources, {n_fit} with a Lya fit, "
+          f"{n_muv} with a usable M_UV")
+    unres = df.loc[~df["resolved"] & df["fwhm"].notna(), "ID"].tolist()
+    if unres:
+        print(f"  unresolved (FWHM upper limit): {unres}")
+    df = df[df["delta_v_kms"].notna() & df["fwhm"].notna()].copy()
+    if len(df) < 2:
+        print("  [skip] fewer than two sources with a fit, no plots")
+        return
 
     z = df["z_sys"].to_numpy()
     fwhm = df["fwhm"].to_numpy()
     dv = df["delta_v_kms"].to_numpy()
     muv_arr = df["M_UV"].to_numpy()
 
-    os.makedirs(outdir, exist_ok=True)
-    kind_tag = "" if args.fwhm_kind == "int" else "obs_"
-    stem = os.path.join(outdir, f"group_{label}_{kind_tag}")
-    title = f"Group {label}"
-    zsets = [(edges3, "zbins"), (edges2, "zbins2")]
-
-    print("")
-    print("[PLOTS]")
     plot_hist(fwhm, fixed_bins(fwhm, args.fwhm_bin), LABEL_FWHM, title, stem + "hist_fwhm.png")
     plot_hist(z, fixed_bins(z, args.z_bin), LABEL_Z, title, stem + "hist_z.png")
     plot_hist(dv, fixed_bins(dv, args.dv_bin), LABEL_DV, title, stem + "hist_dv.png")
     if n_muv:
         plot_hist(muv_arr, fixed_bins(muv_arr, args.muv_bin), LABEL_MUV, title,
                   stem + "hist_muv.png")
-
     for edges, tag in zsets:
         plot_hist_zbins(fwhm, z, fixed_bins(fwhm, args.fwhm_bin), edges, LABEL_FWHM,
                         title, stem + f"hist_fwhm_{tag}.png")
@@ -904,88 +882,100 @@ def run_group(label, args):
     for edges, tag in zsets:
         plot_dv_vs_fwhm_zbins(df, edges, stem + f"dv_vs_fwhm_{tag}.png", title)
 
-    # Literature comparison, FWHM histograms
+    # literature comparison, FWHM histograms
     rng = np.random.default_rng(args.seed)
     xmax = args.fwhm_model_max
-    lv = np.log10(fwhm[np.isfinite(fwhm) & (fwhm > 0)])
+    lv = np.log10(fwhm[fwhm > 0])
     lb = args.fwhm_log_bin
     log_edges = np.arange(np.floor(lv.min() / lb) * lb,
                           max(np.log10(xmax), lv.max()) + lb, lb)
-
-    dz = df.dropna(subset=["z_sys"])
-    muv_all = args.muv if args.muv is not None else median_or(dz["M_UV"], -20.0)
-    if args.muv is None and not np.isfinite(dz["M_UV"]).any():
-        print("[WARN] no usable M_UV, Mason curves fall back to M_UV = -20")
+    muv_all = args.muv if args.muv is not None else median_or(df["M_UV"], -20.0)
+    if args.muv is None and not np.isfinite(df["M_UV"]).any():
+        print("  WARNING no usable M_UV, Mason curves fall back to M_UV = -20")
     muv_note = (rf"$M_{{\rm UV}}={args.muv:g}$ fixed" if args.muv is not None
                 else r"median $M_{\rm UV}$ per bin")
 
     z_all, info_all = plot_fwhm_models(
-        dz, muv_all, log_edges, xmax, args.n_boot, rng, args.density_scaling,
+        df, muv_all, log_edges, xmax, args.n_boot, rng, args.density_scaling,
         stem + "fwhm_models.png", title)
     rows = [("all", z_all, muv_all, info_all)]
-
     for edges, tag in zsets:
-        masks, labels = zbin_masks(dz["z_sys"].to_numpy(), edges)
+        masks, labels = zbin_masks(z, edges)
         out = plot_fwhm_models_bins(
-            dz, masks, labels, args.muv, muv_all, log_edges, xmax, args.n_boot,
+            df, masks, labels, args.muv, muv_all, log_edges, xmax, args.n_boot,
             rng, args.density_scaling, stem + f"fwhm_models_{tag}.png",
             f"{title}  (Mason at each bin's median $z$, {muv_note})")
         rows += [(f"[{tag}] {plain(l)}", zm, mu, inf) for l, zm, mu, inf in out]
 
-    m_ok = dz["M_UV"].dropna()
+    m_ok = df["M_UV"].dropna()
     if len(m_ok) >= 4:
         e2 = list(args.muv_edges2) if args.muv_edges2 else [float(m_ok.median())]
         e3 = (list(args.muv_edges3) if args.muv_edges3
               else [float(q) for q in m_ok.quantile([1 / 3, 2 / 3])])
         for edges, tag in ((e2, "muvbins2"), (e3, "muvbins3")):
-            masks, labels = bin_masks(dz["M_UV"].to_numpy(), edges, "muv")
+            masks, labels = bin_masks(df["M_UV"].to_numpy(), edges, "muv")
             out = plot_fwhm_models_bins(
-                dz, masks, labels, args.muv, muv_all, log_edges, xmax,
+                df, masks, labels, args.muv, muv_all, log_edges, xmax,
                 args.n_boot, rng, args.density_scaling,
                 stem + f"fwhm_models_{tag}.png",
                 f"{title}  (Mason at each bin's median $z$ and {muv_note})")
             rows += [(f"[{tag}] {plain(l)}", zm, mu, inf) for l, zm, mu, inf in out]
     else:
-        print(f"  [skip] M_UV-binned FWHM plots: only {len(m_ok)} sources with M_UV")
+        print(f"  [skip] M_UV-binned FWHM plots, only {len(m_ok)} sources with M_UV")
 
     plot_dv_vs_fwhm_verhamme(df, stem + "dv_vs_fwhm_verhamme.png", title)
     for edges, tag in zsets:
         plot_dv_vs_fwhm_verhamme_zbins(df, edges,
                                        stem + f"dv_vs_fwhm_verhamme_{tag}.png", title)
 
-    # Delta_v and FWHM against M_UV
     for q in ("dv", "fwhm"):
         plot_vs_muv(df, q, stem + f"{q}_vs_muv.png", title)
         for edges, tag in zsets:
             plot_vs_muv_zbins(df, q, edges, stem + f"{q}_vs_muv_{tag}.png", title)
 
-    print("")
-    print("[MODELS] Mason+18 and Mason+19 evaluated at the M_UV and z listed")
-    print(f"         Prieto-Lyon+25 median FWHM = {10**PL25_MU:.0f} km/s (all z)")
+    print("  [MODELS] Mason+18 and Mason+19 at the M_UV and z listed, "
+          f"Prieto-Lyon+25 median FWHM {10**PL25_MU:.0f} km/s")
     for lab, zm, mu, info in rows:
         if info.get("n", 0) < 3:
-            print(f"  {lab:<34s} N={info.get('n', 0)}  too few for a fit")
+            print(f"    {lab:<34s} N={info.get('n', 0)}  too few for a fit")
             continue
-        line = (f"  {lab:<34s} N={info['n']:<3d} z_med={zm:.2f} M_UV={mu:.2f}  "
+        line = (f"    {lab:<34s} N={info['n']:<3d} z_med={zm:.2f} M_UV={mu:.2f}  "
                 f"this work={info['this_median']:.0f}  "
                 f"Mason+18={info['mason18_median']:.0f}  "
                 f"Mason+19={info['mason19_median']:.0f}")
         if "mason_density_median" in info:
             line += f"  density-scaled={info['mason_density_median']:.0f}"
         print(line + "  km/s")
-    print("")
 
 
 def main():
     args = parse_args()
     set_fwhm_kind(args.fwhm_kind)
-    label = args.label.strip().lower()
-    labels = LABELS if label == "all" else [label]
-    for lab in labels:
-        run_group(lab, args)
+    flag = normalise_flag(args.detection)
+    outdir = os.path.abspath(args.outdir)
+    print("plot_lya_science.py")
+    print(f"  reading  {os.path.abspath(args.catalog)}")
+    print(f"  reading  {os.path.abspath(args.fits_csv)}")
+    print(f"  writing  {outdir}/{flag}_<set>_*.png")
+    print(f"  detection flag {flag}, FWHM {args.fwhm_kind}, close pairs {args.close_pairs}, "
+          f"M_UV only where muv_fit_err < {args.muv_max_err:g}")
+
+    df = load_sample(args.catalog, args.fits_csv, flag, args.fwhm_kind,
+                     args.resolve_frac, args.muv_max_err)
+    untested = df.loc[df["det"].isna(), "ID"].tolist()
+    if untested:
+        print(f"  not tested, in neither set: {untested}")
+    if args.close_pairs == "exclude":
+        cp = df.loc[df["close_pair_group"] > 0, "ID"].tolist()
+        if cp:
+            print(f"  close pairs left out: {cp}")
+        df = df[df["close_pair_group"] == 0]
+
+    os.makedirs(outdir, exist_ok=True)
+    for name in args.sets:
+        run_set(df[df["det"] == SETS[name]].copy(), name, flag, args, outdir)
     tag = "" if args.fwhm_kind == "int" else "obs_"
-    print(f"[DONE] figures in {os.path.abspath(args.outdir)} "
-          f"named group_<label>_{tag}*.png")
+    print(f"\n[DONE] figures in {outdir}, named {flag}_<detections|non_detections>_{tag}*.png")
 
 
 if __name__ == "__main__":

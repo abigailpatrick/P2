@@ -1,294 +1,199 @@
 #!/usr/bin/env python3
 """
-Sample-level checks on the beta / M_UV fits written by fit_muv_beta.py.
+muv_beta_diagnostics.py
 
-Looking at fits one by one cannot tell a noisy source from a problem with the
-method. This script asks four questions of the whole sample.
+Checks on the photometric M_UV and beta fits from fit_muv_beta.py.
 
-  1. Are the fits statistically acceptable?
-     chi2 of each fit, converted to a p-value for its degrees of freedom.
-     p < 0.01 means the points scatter more than their errors allow.
+Panels of plots/muv_beta_diagnostics.png
+----------------------------------------
+  (a) beta_fit against z_sys. Filled points have beta_fit_err < 0.5
+      (beta_fit_good), open points do not. Colour is the number of bands in
+      the fit. Below z ~ 3.5 only F814W, F090W and F115W sit in the rest-UV
+      window, so beta is expected to be poorly constrained there. The dashed
+      line is beta = -1.92 (Pirie et al. 2025, the Paper 1 fixed slope).
+  (b) muv_fit against a single-band M_UV. The single band is the one whose
+      rest-frame pivot is closest to 1500 AA, among the bands that pass the
+      1250 AA cut and have data, and M_UV is
+          -2.5 log10(f_nu / 3631 Jy) - 5 log10(D_L / 10 pc) + 2.5 log10(1 + z).
+      For a flat f_nu (beta = -2) the two agree whatever the band. Otherwise
+      they differ by about -2.5 (beta + 2) log10(lambda_rest / 1500), so the
+      points are coloured by the band's rest wavelength.
+  (c) beta_fit_err against the number of bands, with the 0.5 limit.
 
-  2. Is the HST photometry consistent with NIRCam?
-     For each source with >= 2 NIRCam filters in the window, the power law is
-     fit to the NIRCam points alone and used to predict each HST point. The
-     ratio data / prediction is averaged over sources (inverse-variance
-     weighted, with the prediction error included). A ratio of 1 means HST
-     and NIRCam agree. A ratio of 1.15 means that HST filter reads 15 per
-     cent high relative to NIRCam, i.e. a calibration or aperture-correction
-     offset. NIRCam is the anchor, so this cannot tell whether NIRCam itself
-     is offset, only whether the two disagree. The median normalised residual
-     (data - model)/error from the full fit is also given for every filter.
-
-  3. Does beta depend on which telescope we use?
-     Each source is refit with NIRCam filters only. beta(all) against
-     beta(NIRCam) should follow the 1:1 line within the errors.
-
-  4. Is beta actually constrained?
-     sigma_beta against the lever arm, lambda_max / lambda_min (rest frame) of
-     the used filters. A short lever arm gives a poorly constrained slope even
-     when every point has a small error.
-
-Flags written per source (a source can have several, separated by ';')
-  poor_fit      chi2 p-value < 0.01
-  sigma_beta    sigma_beta >= 0.5, the Paper 1 threshold
-  short_lever   lever arm < 1.5
-  beta_extreme  beta < -3 or beta > 1, outside the range of normal stellar populations
-  few_filters   fewer than 3 filters, so no degrees of freedom to test the fit
+The flux columns used are the ones fit_muv_beta.py wrote (<band>_flux, total
+or aperture, whichever it was run with).
 
 Inputs
-  muv_beta_by_JELS_ID.csv (from fit_muv_beta.py) and the four FITS catalogues,
-  which are re-read only to get the flux units.
+------
+  jwst_catalogs/muv_beta_fits.csv
 
 Outputs
-  --out-csv   per-source diagnostics and flags
-  --out-png   six-panel summary figure
+-------
+  plots/muv_beta_diagnostics.png
+  jwst_catalogs/muv_beta_diagnostics.csv   ID, z_sys, n_bands, single_band,
+                                           single_band_lam_rest, muv_single,
+                                           muv_single_err, dmuv (muv_fit - muv_single)
 
 Usage
-  python checks/muv_beta_diagnostics.py
+-----
+python muv_beta_diagnostics.py
 """
 
 import argparse
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.transforms
-from scipy.stats import chi2 as chi2_dist
+from matplotlib.colors import BoundaryNorm, Normalize
+from astropy.cosmology import FlatLambdaCDM
+import astropy.units as u
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import fit_muv_beta as F  # noqa: E402
+import p2_common as pc
+from fit_muv_beta import FILTERS, LAM0
 
-P2 = "/ceph/cephfs/apatrick/P2"
+CAT_DIR = f"{pc.P2_ROOT}/jwst_catalogs"
+COSMO = FlatLambdaCDM(H0=70, Om0=0.3)
+BETA_PIRIE = -1.92
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--fits-csv", default=f"{F.CAT_DIR}/muv_beta_by_JELS_ID.csv")
-    p.add_argument("--cat-dir", default=F.CAT_DIR)
-    p.add_argument("--aper", default="total", choices=["total", "aperture"],
-                   help="Must match the fit_muv_beta.py run.")
+    p.add_argument("--fits-csv", default=f"{CAT_DIR}/muv_beta_fits.csv")
+    p.add_argument("--out-csv", default=f"{CAT_DIR}/muv_beta_diagnostics.csv")
+    p.add_argument("--out-png", default=f"{pc.P2_ROOT}/plots/muv_beta_diagnostics.png")
     p.add_argument("--lya-cut", type=float, default=1250.0)
-    p.add_argument("--uv-max", type=float, default=3000.0)
-    p.add_argument("--out-csv", default=f"{F.CAT_DIR}/muv_beta_diagnostics.csv")
-    p.add_argument("--out-png", default=f"{P2}/plots/muv_beta_diagnostics.png")
+    p.add_argument("--max-beta-err", type=float, default=0.5)
     return p.parse_args()
 
 
-def model_fnu_njy(lam_rest, f1500_njy, beta):
-    """f_lambda propto lambda^beta, so f_nu propto lambda^(beta + 2)."""
-    return f1500_njy * (lam_rest / F.LAM0) ** (beta + 2)
+def single_band_muv(row, lya_cut):
+    """(band, rest pivot, M_UV, error) from the band nearest rest 1500 AA."""
+    z = row["z_sys"]
+    best = None
+    for filt, (_, piv, blue, _red) in FILTERS.items():
+        b = filt.lower()
+        f, e = row.get(f"{b}_flux", np.nan), row.get(f"{b}_flux_err", np.nan)
+        if not (np.isfinite(f) and np.isfinite(e) and e > 0 and f > 0):
+            continue
+        if blue / (1 + z) < lya_cut:
+            continue
+        d = abs(np.log(piv / (1 + z) / LAM0))
+        if best is None or d < best[0]:
+            best = (d, filt, piv / (1 + z), f, e)
+    if best is None:
+        return None, np.nan, np.nan, np.nan
+    _, filt, lam_rest, f, e = best
+    dl_pc = COSMO.luminosity_distance(z).to(u.pc).value
+    m = -2.5 * np.log10(f * 1e-6 / 3631.0)
+    muv = m - 5 * np.log10(dl_pc / 10.0) + 2.5 * np.log10(1 + z)
+    return filt, lam_rest, muv, 2.5 / np.log(10) * e / f
 
 
 def main():
     a = parse_args()
-    print(f"  fits csv  {os.path.abspath(a.fits_csv)}")
-    print(f"  out csv   {os.path.abspath(a.out_csv)}")
-    print(f"  out png   {os.path.abspath(a.out_png)}\n")
+    print("muv_beta_diagnostics.py")
+    print(f"  reading  {os.path.abspath(a.fits_csv)}")
+    df = pd.read_csv(a.fits_csv)
+    df["ID"] = df["ID"].astype(int)
+    ok = df["fit_flag"] == "ok"
+    d = df[ok].copy()
 
-    fits = pd.read_csv(a.fits_csv)
-    cats = {n: (t, s) for n, t, s in F.load_catalogues(a.cat_dir, a.aper)}
-    print()
+    sb = d.apply(lambda r: single_band_muv(r, a.lya_cut), axis=1, result_type="expand")
+    d[["single_band", "single_band_lam_rest", "muv_single", "muv_single_err"]] = sb
+    d["dmuv"] = d["muv_fit"] - d["muv_single"]
+    good = d["beta_fit_err"] < a.max_beta_err
 
-    rows, resid = [], []
-    for _, r in fits[fits["fit_flag"] == "ok"].iterrows():
-        sid, z = int(r["ID"]), float(r["z"])
-        tab, scales = cats[r["phot_catalogue"]]
-        used, _ = F.select_filters(z, scales, tab.loc[sid], a.aper, a.lya_cut, a.uv_max)
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
 
-        # residuals against the fit already in the csv
-        lam = np.array([d["lam_rest"] for d in used])
-        fnu = np.array([d["fnu_jy"] for d in used]) * 1e9
-        efnu = np.array([d["efnu_jy"] for d in used]) * 1e9
-        norm = (fnu - model_fnu_njy(lam, r["f1500_nJy"], r["beta"])) / efnu
-        for d, n in zip(used, norm):
-            resid.append(dict(ID=sid, filt=d["filt"], inst=F.FILTERS[d["filt"]][0],
-                              resid=n, ratio=np.nan, ratio_err=np.nan))
+    # (a) beta against z
+    ax = axes[0]
+    nb = d["n_bands"].astype(int)
+    levels = np.arange(nb.min() - 0.5, nb.max() + 1.5)
+    cmap = plt.get_cmap("viridis", len(levels) - 1)
+    norm = BoundaryNorm(levels, cmap.N)
+    ax.errorbar(d["z_sys"], d["beta_fit"], yerr=d["beta_fit_err"], fmt="none",
+                ecolor="0.7", elinewidth=0.7, zorder=1)
+    sc = ax.scatter(d.loc[good, "z_sys"], d.loc[good, "beta_fit"], c=nb[good],
+                    cmap=cmap, norm=norm, s=28, edgecolor="k", lw=0.4, zorder=3,
+                    label=rf"$\sigma_\beta < {a.max_beta_err:g}$")
+    ax.scatter(d.loc[~good, "z_sys"], d.loc[~good, "beta_fit"], facecolor="white",
+               edgecolor=cmap(norm(nb[~good])), s=28, lw=1.0, zorder=3,
+               label=rf"$\sigma_\beta \geq {a.max_beta_err:g}$")
+    ax.axhline(BETA_PIRIE, color="0.3", ls="--", lw=0.8, label=r"$\beta=-1.92$")
+    cb = fig.colorbar(sc, ax=ax, pad=0.02, ticks=np.arange(nb.min(), nb.max() + 1))
+    cb.set_label("bands in fit")
+    # limits from the points, so a few huge error bars don't flatten the plot
+    ax.set_ylim(max(d["beta_fit"].min() - 0.7, -7), min(d["beta_fit"].max() + 0.7, 4))
+    ax.set_xlabel(r"$z_{\rm sys}$")
+    ax.set_ylabel(r"$\beta_{\rm fit}$")
+    ax.legend(frameon=False, fontsize=8, loc="best")
 
-        dof = len(used) - 2
-        chi2 = float(np.sum(norm**2))
-        pval = chi2_dist.sf(chi2, dof) if dof > 0 else np.nan
+    # (b) muv_fit against the single-band M_UV
+    ax = axes[1]
+    s = d.dropna(subset=["muv_single"])
+    lo = np.nanmin([s["muv_fit"].min(), s["muv_single"].min()]) - 0.3
+    hi = np.nanmax([s["muv_fit"].max(), s["muv_single"].max()]) + 0.3
+    ax.plot([lo, hi], [lo, hi], color="0.3", ls="--", lw=0.8)
+    ax.errorbar(s["muv_single"], s["muv_fit"], xerr=s["muv_single_err"],
+                yerr=s["muv_fit_err"], fmt="none", ecolor="0.7", elinewidth=0.7)
+    sc = ax.scatter(s["muv_single"], s["muv_fit"], c=s["single_band_lam_rest"],
+                    cmap="plasma", norm=Normalize(1250, 3000), s=28,
+                    edgecolor="k", lw=0.4, zorder=3)
+    cb = fig.colorbar(sc, ax=ax, pad=0.02)
+    cb.set_label(r"single band rest pivot [$\rm \AA$]")
+    ax.set_xlim(hi, lo)
+    ax.set_ylim(hi, lo)
+    ax.set_xlabel(r"$M_{\rm UV}$, band nearest 1500 $\rm \AA$")
+    ax.set_ylabel(r"$M_{\rm UV,fit}$")
+    if len(s):
+        ax.text(0.04, 0.96, rf"median $\Delta = {s['dmuv'].median():+.2f}$ mag",
+                transform=ax.transAxes, va="top", fontsize=8)
 
-        # NIRCam-only refit
-        nc = [d for d in used if F.FILTERS[d["filt"]][0] == "NIRCam"]
-        b_nc, eb_nc = np.nan, np.nan
-        if len(nc) >= 2:
-            try:
-                res = F.fit_source(nc, z)
-                b_nc, eb_nc = res["beta"], res["beta_err"]
-                # predict each HST point from the NIRCam-only fit
-                frac_f0 = res["M_UV_err"] * np.log(10) / 2.5
-                for k, d in enumerate(used):
-                    if F.FILTERS[d["filt"]][0] == "NIRCam":
-                        continue
-                    pred = model_fnu_njy(lam[k], res["f1500_nJy"], res["beta"])
-                    frac_pred = np.hypot(frac_f0, np.log(lam[k] / F.LAM0) * res["beta_err"])
-                    # error depends on the prediction, not the data, so high
-                    # and low ratios get the same weight
-                    rec = next(x for x in reversed(resid)
-                               if x["ID"] == sid and x["filt"] == d["filt"])
-                    rec["ratio"] = fnu[k] / pred
-                    rec["ratio_err"] = np.hypot(efnu[k] / pred, frac_pred)
-            except (RuntimeError, ValueError):
-                pass
+    # (c) sigma_beta against the number of bands
+    ax = axes[2]
+    rng = np.random.default_rng(0)
+    jit = rng.uniform(-0.12, 0.12, len(d))
+    ax.scatter(d["n_bands"] + jit, d["beta_fit_err"], s=22, color="C0",
+               edgecolor="k", lw=0.4)
+    ax.axhline(a.max_beta_err, color="C3", ls="--", lw=0.8)
+    ax.set_yscale("log")
+    ax.set_xticks(np.arange(nb.min(), nb.max() + 1))
+    ax.set_xlabel("bands in fit")
+    ax.set_ylabel(r"$\sigma_{\beta}$")
 
-        lever = lam.max() / lam.min()
-        flags = []
-        if np.isfinite(pval) and pval < 0.01:
-            flags.append("poor_fit")
-        if r["beta_err"] >= 0.5:
-            flags.append("sigma_beta")
-        if lever < 1.5:
-            flags.append("short_lever")
-        if r["beta"] < -3 or r["beta"] > 1:
-            flags.append("beta_extreme")
-        if len(used) < 3:
-            flags.append("few_filters")
-
-        rows.append(dict(ID=sid, z=z, n_filters=len(used), beta=r["beta"],
-                         beta_err=r["beta_err"], M_UV=r["M_UV"], M_UV_err=r["M_UV_err"],
-                         chi2=chi2, dof=dof, chi2_nu=chi2 / dof if dof > 0 else np.nan,
-                         p_value=pval, lever_arm=lever,
-                         n_nircam=len(nc), beta_nircam=b_nc, beta_nircam_err=eb_nc,
-                         flags=";".join(flags)))
-
-    df = pd.DataFrame(rows)
-    rf = pd.DataFrame(resid)
-
-    # ------------------------------------------------------------------ print
-    print(f"{len(df)} fitted sources\n")
-    print("Fit quality (sources with dof >= 1)")
-    t = df[df["dof"] > 0]
-    print(f"  median chi2_nu        {t['chi2_nu'].median():.2f}   (expect about 1)")
-    print(f"  p < 0.01              {(t['p_value'] < 0.01).sum()} of {len(t)}"
-          f"   (expect about {0.01 * len(t):.1f} by chance)")
-    print(f"  dof = 0, untestable   {(df['dof'] == 0).sum()}\n")
-
-    print("Per-filter checks")
-    print("  ratio  HST only. Weighted mean of data / prediction from the NIRCam-only")
-    print("         fit. 1.00 = agrees with NIRCam, 1.15 = reads 15 per cent high")
-    print("  scat   chi2_nu of the ratios about their mean. >> 1 means more scatter")
-    print("         between sources than the errors allow")
-    print("  resid  median (data - model)/error in the full fit, expect about 0")
-    g = rf.groupby("filt")["resid"]
-    lo = rf.dropna(subset=["ratio", "ratio_err"])
-
-    def wmean(x):
-        w = 1 / x["ratio_err"] ** 2
-        m = np.sum(w * x["ratio"]) / w.sum()
-        return pd.Series({"N_ratio": len(x), "ratio": m, "ratio_err": 1 / np.sqrt(w.sum()),
-                          "scat": np.sum(w * (x["ratio"] - m) ** 2) / max(len(x) - 1, 1)})
-    lw = lo.groupby("filt")[["ratio", "ratio_err"]].apply(wmean) if len(lo) else pd.DataFrame()
-    summ = pd.DataFrame({"inst": rf.groupby("filt")["inst"].first(),
-                         "N": g.size(), "resid": g.median()}).join(lw)
-    summ = summ.loc[[f for f in F.FILTERS if f in summ.index]]
-    print(summ.to_string(float_format=lambda x: f"{x:6.2f}", na_rep="     -"))
-    print()
-
-    both = df.dropna(subset=["beta_nircam"])
-    d = both["beta"] - both["beta_nircam"]
-    print("beta(all) - beta(NIRCam only)")
-    print(f"  N = {len(both)}, median = {d.median():+.2f}, "
-          f"NMAD = {1.4826 * np.median(np.abs(d - d.median())):.2f}\n")
-
-    print("Flags")
-    for f in ["poor_fit", "sigma_beta", "short_lever", "beta_extreme", "few_filters"]:
-        ids = df.loc[df["flags"].str.contains(f), "ID"].tolist()
-        print(f"  {f:13} {len(ids):3d}  {ids}")
-    clean = df["flags"] == ""
-    print(f"  no flags      {clean.sum():3d}")
-    print(f"\nbeta of unflagged sources: median {df.loc[clean, 'beta'].median():.2f}, "
-          f"16-84th {df.loc[clean, 'beta'].quantile(0.16):.2f} to "
-          f"{df.loc[clean, 'beta'].quantile(0.84):.2f}")
-
-    # ------------------------------------------------------------------ plot
-    fig, ax = plt.subplots(2, 3, figsize=(15, 9))
-    a1, a2, a3, a4, a5, a6 = ax.ravel()
-
-    order = list(summ.index)
-    data = [rf.loc[rf["filt"] == f, "resid"].values for f in order]
-    bp = a1.boxplot(data, positions=range(len(order)), showfliers=True, patch_artist=True)
-    for patch, f in zip(bp["boxes"], order):
-        patch.set_facecolor("C0" if summ.loc[f, "inst"] == "NIRCam" else "C1")
-    for k, f in enumerate(order):
-        if np.isfinite(summ.loc[f].get("ratio", np.nan)):
-            a1.text(k, 0.97, f"{summ.loc[f, 'ratio']:.2f}", ha="center", va="top",
-                    fontsize=9, color="C1", fontweight="bold",
-                    transform=matplotlib.transforms.blended_transform_factory(
-                        a1.transData, a1.transAxes))
-    a1.set_xticks(range(len(order)))
-    a1.set_xticklabels(order, rotation=45)
-    a1.axhline(0, color="k", lw=0.8)
-    a1.axhspan(-1, 1, color="0.9", zorder=0)
-    lo_, hi_ = a1.get_ylim()
-    a1.set_ylim(lo_, hi_ + 0.15 * (hi_ - lo_))
-    a1.set_ylabel("(data - model) / error")
-    a1.set_title("Residuals (blue NIRCam, orange HST)\nnumbers: HST / NIRCam-predicted", fontsize=10)
-
-    ok = t["chi2_nu"].notna()
-    for k, c in zip(sorted(t["dof"].unique()), plt.cm.viridis(np.linspace(0, 0.9, 6))):
-        sel = t[t["dof"] == k]
-        a2.hist(np.log10(sel["chi2_nu"]), bins=np.linspace(-2, 2, 25), histtype="step",
-                lw=1.5, color=c, label=f"dof = {k}")
-    a2.axvline(0, color="k", ls="--", lw=0.8)
-    a2.set_xlabel(r"$\log_{10}\,\chi^2_\nu$")
-    a2.set_title(r"Fit quality ($\chi^2_\nu \approx 1$ expected)")
-    a2.legend(fontsize=8)
-
-    a3.errorbar(both["beta_nircam"], both["beta"], xerr=both["beta_nircam_err"],
-                yerr=both["beta_err"], fmt="o", ms=4, alpha=0.6, lw=0.8)
-    lim = [-4, 1.5]
-    a3.plot(lim, lim, "k--", lw=0.8)
-    a3.set_xlim(lim); a3.set_ylim(lim)
-    a3.set_xlabel(r"$\beta$ (NIRCam only)")
-    a3.set_ylabel(r"$\beta$ (NIRCam + HST)")
-    a3.set_title("Does HST change beta?")
-
-    sc = a4.scatter(df["lever_arm"], df["beta_err"], c=df["n_filters"], cmap="viridis", s=25)
-    a4.axhline(0.5, color="C3", ls="--", lw=0.8, label=r"$\sigma_\beta = 0.5$")
-    a4.axvline(1.5, color="0.5", ls=":", lw=0.8)
-    a4.set_yscale("log")
-    a4.set_xlabel(r"lever arm $\lambda_{\rm max}/\lambda_{\rm min}$ (rest)")
-    a4.set_ylabel(r"$\sigma_\beta$")
-    a4.set_title("Is beta constrained?")
-    a4.legend(fontsize=8)
-    fig.colorbar(sc, ax=a4, label="N filters")
-
-    flag = df["flags"] != ""
-    a5.errorbar(df.loc[~flag, "z"], df.loc[~flag, "beta"], yerr=df.loc[~flag, "beta_err"],
-                fmt="o", ms=4, color="C0", label="no flag")
-    a5.errorbar(df.loc[flag, "z"], df.loc[flag, "beta"], yerr=df.loc[flag, "beta_err"],
-                fmt="o", ms=4, mfc="none", color="0.5", label="flagged")
-    a5.axhline(-1.92, color="C3", ls="--", lw=0.8, label=r"$\beta=-1.92$ (Paper 1)")
-    a5.set_ylim(-4.5, 2)
-    a5.set_xlabel("z")
-    a5.set_ylabel(r"$\beta$")
-    a5.legend(fontsize=8)
-
-    a6.errorbar(df.loc[~flag, "M_UV"], df.loc[~flag, "beta"], xerr=df.loc[~flag, "M_UV_err"],
-                yerr=df.loc[~flag, "beta_err"], fmt="o", ms=4, color="C0")
-    a6.errorbar(df.loc[flag, "M_UV"], df.loc[flag, "beta"], fmt="o", ms=4,
-                mfc="none", color="0.5")
-    a6.set_ylim(-4.5, 2)
-    a6.invert_xaxis()
-    a6.set_xlabel(r"$M_{\rm UV}$")
-    a6.set_ylabel(r"$\beta$")
-    a6.set_title(r"$\beta$ - $M_{\rm UV}$ (brighter to the right)")
-
+    fig.suptitle(f"Photometric M_UV and beta, {int(ok.sum())} of {len(df)} fitted, "
+                 f"{int(good.sum())} with sigma_beta < {a.max_beta_err:g}", fontsize=10)
     fig.tight_layout()
-    os.makedirs(os.path.dirname(os.path.abspath(a.out_png)), exist_ok=True)
-    fig.savefig(a.out_png, dpi=130)
+
+    png = os.path.abspath(a.out_png)
+    os.makedirs(os.path.dirname(png), exist_ok=True)
+    fig.savefig(png, dpi=200)
     plt.close(fig)
 
-    os.makedirs(os.path.dirname(os.path.abspath(a.out_csv)), exist_ok=True)
-    df.to_csv(a.out_csv, index=False)
-    print(f"\nwrote {os.path.abspath(a.out_csv)}")
-    print(f"wrote {os.path.abspath(a.out_png)}")
+    print(f"\n  fitted              {int(ok.sum())} of {len(df)}")
+    print(f"  sigma_beta < {a.max_beta_err:g}    {int(good.sum())}")
+    for n, grp in d.groupby("n_bands"):
+        print(f"    {int(n)} bands  N={len(grp):<3d} median sigma_beta {grp['beta_fit_err'].median():.2f}"
+              f"  z {grp['z_sys'].min():.2f} to {grp['z_sys'].max():.2f}")
+    if len(s):
+        print(f"  muv_fit - single band  median {s['dmuv'].median():+.2f}, "
+              f"scatter (NMAD) {1.4826 * np.median(np.abs(s['dmuv'] - s['dmuv'].median())):.2f} mag")
+        big = s[np.abs(s["dmuv"]) > 0.5]
+        if len(big):
+            print("  differ by > 0.5 mag  " + ", ".join(
+                f"{i} ({v:+.2f}, {b})" for i, v, b in zip(big["ID"], big["dmuv"], big["single_band"])))
+
+    out = d[["ID", "z_sys", "n_bands", "single_band", "single_band_lam_rest",
+             "muv_single", "muv_single_err", "muv_fit", "dmuv", "beta_fit",
+             "beta_fit_err"]]
+    csv = os.path.abspath(a.out_csv)
+    out.to_csv(csv, index=False)
+    print(f"\nWrote  {png}")
+    print(f"Wrote  {csv}")
 
 
 if __name__ == "__main__":

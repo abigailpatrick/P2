@@ -1,131 +1,140 @@
 #!/usr/bin/env python3
 """
-Per-source figures comparing the MUSE Lya line with the NIRSpec systemic line.
+plot_lya_vs_systemic.py
 
-For each source two figures are written to  <outroot>/<ID>/ :
+Per-source figures comparing the MUSE Lya line with the NIRSpec line that set
+z_sys, for every source in lya_catalog.csv, and contact-sheet PDFs of the
+detections and non-detections.
 
+Per source, in MUSE_subcubes/<ID>/
+-----------------------------------
   <ID>_lya_systemic_panels.png
-      Left panel   MUSE Lya spectrum with the skewed-Gaussian fit and its MC
-                   1 sigma band, red dashed line at systemic Lya, grey dashed
-                   line at the Lya peak, and Delta_v written in the corner.
-      Right panel  NIRSpec continuum-subtracted spectrum of the line that set
-                   z_sys ([OIII] or Ha, as chosen in
-                   delta_v_from_best_zsys_line.csv) with its LiMe fit and 1
-                   sigma band, and z_sys written in the corner. For [OIII]
-                   where the tied doublet was fitted, both 4959 and 5007 get a
-                   red dashed line at their systemic wavelength and the panel
-                   is centred on the midpoint of the pair (--doublet-pad sets
-                   how far it extends beyond each line).
-      Both panels are normalised to the peak of their own fitted model, with a
-      velocity axis on top where v = 0 is systemic Lya (left) and systemic
-      [OIII] 5007 or Ha (right).
-
+      Left    MUSE Lya spectrum with the skewed-Gaussian fit and an MC
+              1 sigma band, red dashed line at systemic Lya, grey dashed line
+              at the Lya peak, Delta_v and Sigma_Lya in the corner.
+      Right   NIRSpec spectrum of the z_sys line ([OIII] or Halpha) with its
+              local continuum removed and the LiMe model. Where the [OIII]
+              doublet was fitted jointly both lines get a systemic line and
+              the panel is centred between them.
+      Each panel is normalised to the peak of its own model, with a velocity
+      axis on top (v = 0 at systemic Lya on the left, at systemic [OIII] 5007
+      or Halpha on the right).
   <ID>_lya_systemic_overlay.png
-      Both lines in one panel on a shared velocity axis about systemic, each
-      normalised to its fitted peak, with a dashed line at systemic (v = 0)
-      and a dashed line at the Lya peak (v = Delta_v).
+      Both lines on one velocity axis about systemic, each normalised to its
+      model peak, with dashed lines at v = 0 and at v = Delta_v.
 
-Inputs (all from the existing P2 pipeline)
-------------------------------------------
-  delta_v_from_best_zsys_line.csv   z_sys, z_sys_line, z_sys_snr, delta_v_kms
-  lya_properties_mc.csv             skewed-Gaussian parameters (mu, sigma,
-                                    alpha_skew, flux_fit, best_center), lya_snr
-  systemic_redshifts_by_JELS_ID.csv grating of the chosen systemic line
-  <line>_results_by_JELS_ID.csv     DJA z of that grating (band placement)
-  {ID}_spectrum.npz                 MUSE aperture spectrum (air wavelengths)
-  <ID>_<grating>_spectra_lime.fits  NIRSpec spectrum (vacuum wavelengths)
+PDFs, in plots/lya_systemic_pdfs/
+---------------------------------
+  lya_systemic_panels_<flag>_detections.pdf
+  lya_systemic_panels_<flag>_non_detections.pdf
+  lya_systemic_overlay_<flag>_detections.pdf
+  lya_systemic_overlay_<flag>_non_detections.pdf
+
+<flag> is the detection column of lya_catalog.csv used to split the sample,
+--detection, default det_98 (Sigma_Lya above the pooled 98th percentile of
+the false positions). det_99_5 and det_95 are the other choices, and any
+det_ column build_lya_catalog.py was asked to make. The figures themselves do
+not depend on the flag, so --pdf-only remakes the PDFs for another flag in a
+few seconds without refitting. Sources not tested for Lya (lya_status not
+"ok", e.g. 65863 in the AO gap) still get their figures but are in neither
+PDF, and are listed on the first page of each.
 
 Where the lines come from
 -------------------------
-Lya. The plotted model is the saved science fit. fit_lya_properties_grating's
-own skew_model_lsf (intrinsic skewed Gaussian convolved with the MUSE LSF) is
-evaluated at mu, sigma, alpha_skew, flux_fit and sigma_lsf_ang from
-lya_properties_mc.csv, so the curve is what is compared with the data. Its
-peak (observed or intrinsic, following the peak_used column) is checked
-against lya_peak_wave.
+Lya. The saved science fit (lya_fits_mc.csv), evaluated with
+fit_lya_properties_grating.skew_model_lsf at mu, sigma, alpha_skew, flux_fit
+and sigma_lsf_ang, i.e. the LSF-convolved model compared with the data. The
+grey band is the same model-mode bootstrap as mc_lya_errors_grating.py with
+--n-mc refits (display only). Its peak is checked against lya_peak_wave.
+Where the Lya fit failed there is no model or peak line, and the spectrum is
+normalised to its brightest pixel (after display binning) in the Lya band,
+-300/+1200 km/s, with a floor of 3 sigma so pure noise is not stretched.
 
-Systemic line. The LiMe scripts save only z, z_err and S/N, not the
-continuum-subtracted spectrum or the Gaussian parameters. So the fit is
-repeated here by importing lime_OIII_jointfit.py and lime_lines_jointfit.py
-and calling their own functions in the same order as fit_one() and
-fit_one_line() (load_lime_spectrum, the band builders, band_in_range, the
-fit_cfg builders, get_5007_row / get_line_row). The only thing mirrored rather
-than imported is the continuum call, degree_list=[3, 4] and
-emis_threshold=[3, 2], which is hardcoded inside those functions. The repeated
-fit is checked against the catalogue z_sys and a warning is printed if they
-differ by more than --refit-tol (default 1 km/s). A mismatch means the source
-was refitted by hand with overrides, and the dashed systemic line always stays
-at the catalogue z_sys.
-
-The grey bands are display aids only. For Lya they use the same model-mode
-bootstrap as mc_lya_errors_grating.py. For the systemic line they are drawn
-from the LiMe parameter errors.
+Systemic line. lime_<line>_fits.csv keeps z, its error and the S/N but not
+the Gaussian parameters, so the fit is repeated here with lime_fit_lines.py's
+own functions (load_spectrum, band_df, ha_blend_band, ha_blend_cfg,
+frame_value) and the band settings, input redshift (z_used) and method
+recorded in lime_<line>_fits.csv for the z_sys grating. The order of calls
+mirrors fit_line. The repeated fit is checked against the catalogue z_sys and
+a warning printed if they differ by more than --refit-tol (1 km/s). The
+dashed systemic line always sits at the catalogue z_sys. The model is drawn
+as lime_fit_lines.plot_fit draws it (profile_flux, center, sigma per
+component on the local linear continuum m_cont, n_cont of the main line).
+For Halpha fitted as the Halpha + [NII] blend the model includes [NII].
 
 Wavelength frames
 -----------------
-MUSE is in air, NIRSpec in vacuum. The MUSE wavelengths and Lya model are
-converted to vacuum before plotting, so velocities follow the same convention
-as Delta_v in the catalogue,  v = c (z_lambda - z_sys) / (1 + z_sys).
+MUSE is in air and NIRSpec in vacuum. The MUSE wavelengths and Lya model are
+moved to vacuum before plotting, so velocities follow Delta_v,
+v = c (z_lambda - z_sys) / (1 + z_sys).
 
 Binning
 -------
-NIRSpec is plotted at native sampling. MUSE is rebinned by an integer factor
-chosen so its pixel width in km/s roughly matches the NIRSpec pixel width at
-the line (override with --muse-bin). Rebinning is for display only, the fits
-use full-resolution data.
+NIRSpec at native sampling. MUSE rebinned by an integer factor so its pixel
+width in km/s roughly matches NIRSpec at the line (--muse-bin overrides).
+Display only, the fits use the full-resolution data.
+
+Environment
+-----------
+The LiMe refit needs env312. --pdf-only needs no LiMe and runs in either.
+
+Inputs
+------
+  MUSE_catalogs/lya_catalog.csv                   build_lya_catalog.py
+  jwst_catalogs/primer_minerva_in_muse_zsys.csv   z_sys_line, z_sys_snr
+  MUSE_catalogs/lya_fits_mc.csv                   Lya fit parameters
+  MUSE_catalogs/lya_false_pos_thresholds.csv      threshold quoted in the PDFs
+  jwst_catalogs/lime_<line>_fits.csv              z_used, method, band settings
+  MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz
+  jwst_spectra_pm/<G>_<F>/<ID>_<G>_<F>_spectra_lime.fits
 
 Usage
 -----
-python plot_lya_vs_systemic.py --id 48121
-python plot_lya_vs_systemic.py --group a
-python plot_lya_vs_systemic.py                 # every source with a z_sys line
+python plot_lya_vs_systemic.py --ids 23070 50803        # test, figures and PDFs
+python plot_lya_vs_systemic.py                          # all sources, det_98
+python plot_lya_vs_systemic.py --pdf-only --detection det_99_5
+python plot_lya_vs_systemic.py --pdf-only --detection 95
 """
 
 import argparse
 import os
-import sys
 import warnings
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-from astropy.io import fits
-from astropy.table import Table
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
-C_KMS = 299792.458
-LYA_REST = 1215.67
+import p2_common as pc
+import fit_lya_properties_grating as flp
+from make_lya_fit_pdfs import load_png
 
-P2 = "/ceph/cephfs/apatrick/P2"
+C_KMS = pc.C_KMS
+LYA_REST = pc.LYA_REST
+P2 = pc.P2_ROOT
+CAT = pc.MUSE_CAT_DIR
 
-GRATING_FULL = {
-    "G235M": "G235M_F170LP",
-    "G235H": "G235H_F170LP",
-    "G395M": "G395M_F290LP",
-    "G395H": "G395H_F290LP",
-}
+GRATING_FILTER = {"G235H": "F170LP", "G235M": "F170LP",
+                  "G395H": "F290LP", "G395M": "F290LP"}
 
-# Display names for the systemic lines. The fitting itself (labels, rest
-# wavelengths, band geometry, fit_cfg) is imported from the LiMe scripts.
 LINE_TEX = {
     "OIII": r"[O$\,$III]$\,\lambda5007$",
     "Ha": r"H$\alpha$",
-    "Hbeta": r"H$\beta$",
-    "NII": r"[N$\,$II]$\,\lambda6584$",
-    "OII": r"[O$\,$II]$\,\lambda3729$",
 }
 
-# Continuum call hardcoded inside fit_one() / fit_one_line() of both LiMe
-# scripts. Mirrored here because it is not exposed as a constant there.
+# spec.fit.continuum call inside lime_fit_lines.fit_line, mirrored because it
+# is written inline there rather than as a constant.
 CONT_DEGREES = [3, 4]
 CONT_THRESH = [3, 2]
 
+A4 = (8.27, 11.69)
 
 # ---------------------------------------------------------------------------
-# Style. Serif MNRAS sizing as in plot_lya_science.py, colours after the
-# reference figures.
+# Style, MNRAS serif as before
 # ---------------------------------------------------------------------------
 MNRAS_COL_WIDTH_IN = 3.46
 MNRAS_PAGE_WIDTH_IN = 7.09
@@ -152,25 +161,13 @@ COL_SYS = "#f08080"             # pale red systemic line
 COL_PEAK = "0.35"               # grey Lya peak line
 COL_MODEL = "0.2"
 COL_MODEL_BAND = "0.6"
-
-COL_OV_LYA = "#7aa6e8"          # overlay figure, pastel blue
-COL_OV_SYS = "#79c68f"          # overlay figure, pastel green
+COL_OV_LYA = "#7aa6e8"          # overlay, pastel blue
+COL_OV_SYS = "#79c68f"          # overlay, pastel green
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def import_pipeline(scripts_dir):
-    """Import the three science scripts so every fit and model comes from
-    the same code that produced the analysis catalogues."""
-    sys.path.insert(0, os.path.abspath(scripts_dir))
-    import fit_lya_properties_grating as flp
-    import lime_OIII_jointfit as oj
-    import lime_lines_jointfit as lj
-    return flp, oj, lj
-
-
 def v_from_wave(wave_vac, lam_sys_vac):
     """Velocity about systemic, same convention as Delta_v."""
     return C_KMS * (np.asarray(wave_vac, dtype=float) / lam_sys_vac - 1.0)
@@ -191,7 +188,8 @@ def rebin(wave, flux, err, nbin):
     w = wave[:n].reshape(-1, nbin)
     f = flux[:n].reshape(-1, nbin)
     e = err[:n].reshape(-1, nbin)
-    with np.errstate(invalid="ignore"):
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
         return (np.nanmean(w, axis=1), np.nanmean(f, axis=1),
                 np.sqrt(np.nansum(e ** 2, axis=1)) / nbin)
 
@@ -207,235 +205,224 @@ def pixel_kms(wave, centre):
 def y_limits(flux_list, err_list, pad_frac=0.12):
     vals = []
     for f, e in zip(flux_list, err_list):
-        vals.append(f)
+        vals.append(np.asarray(f))
         if e is not None:
-            vals.append(e)
-            vals.append(-e)
-    vals = np.concatenate([np.asarray(v)[np.isfinite(v)] for v in vals])
-    lo, hi = min(np.nanmin(vals), -0.2), max(np.nanmax(vals), 1.1)
+            vals += [np.asarray(e), -np.asarray(e)]
+    vals = np.concatenate([v[np.isfinite(v)] for v in vals]) if vals else np.array([])
+    lo = min(np.nanmin(vals), -0.2) if vals.size else -0.2
+    hi = max(np.nanmax(vals), 1.1) if vals.size else 1.1
     pad = pad_frac * (hi - lo)
     return lo - pad, hi + pad
+
+
+def flag_name(s):
+    """det_98, 98 or 98.0 -> det_98. 99.5 -> det_99_5."""
+    s = str(s)
+    if s.startswith("det_"):
+        return s
+    return "det_" + f"{float(s):g}".replace(".", "_")
 
 
 # ---------------------------------------------------------------------------
 # MUSE Lya
 # ---------------------------------------------------------------------------
-
-def load_lya(npz_path, prow, flp, n_mc, rng, fit_window, sigma_min, alpha_max):
+def load_lya(npz_path, frow, z_sys, n_mc, rng, fit_window, sigma_min, alpha_max,
+             dv_blue, dv_red):
     """MUSE spectrum and the science Lya fit, in vacuum wavelength.
 
-    The plotted model is the saved science fit, flp.skew_model_lsf evaluated
-    at mu, sigma, alpha_skew, flux_fit and sigma_lsf_ang from
-    lya_properties_mc.csv, i.e. the LSF-convolved model. Nothing is refitted
-    for the model itself. The optional grey 1 sigma band uses the
-    same model-mode bootstrap as mc_lya_errors_grating.py (best model plus
-    noise, refit with flp.fit_skewed_gaussian and identical settings).
+    With a successful fit the model is flp.skew_model_lsf at the saved
+    parameters and everything is normalised to its peak. Without one there
+    is no model, and the normalisation is set later from the data
+    (normalise_no_fit) once the display binning is known.
     """
     d = np.load(npz_path)
     wave_air = np.asarray(d["wave"], dtype=float)
     flux = np.asarray(d["flux"], dtype=float)
     var = np.asarray(d["var"], dtype=float)
     err = np.sqrt(np.clip(var, 0.0, np.inf))
+    out = dict(wave=flp.air_to_vac(wave_air), flux=flux, err=err, grid=None, model=None,
+               lo=None, hi=None, n_mc=0, peak_check_kms=np.nan, has_fit=False, norm=1.0)
 
-    mu, sig, alpha, ftot, s_lsf = (float(prow[k]) for k in
-                                   ("mu", "sigma", "alpha_skew", "flux_fit",
-                                    "sigma_lsf_ang"))
-    centre = float(prow["best_center"]) if np.isfinite(prow["best_center"]) else mu
-    peak_used = str(prow.get("peak_used", "obs"))
+    ok = frow is not None and str(frow.get("fit_success", False)).lower() in ("true", "1") and np.all(
+        np.isfinite([float(frow[k]) for k in ("mu", "sigma", "alpha_skew", "flux_fit",
+                                              "sigma_lsf_ang")]))
+    if not ok:
+        lam = pc.LYA_REST * (1 + z_sys)
+        out["band_vac"] = (lam * (1 - dv_blue / C_KMS), lam * (1 + dv_red / C_KMS))
+        return out
+
+    mu, sig, alpha, ftot, s_lsf = (float(frow[k]) for k in
+                                   ("mu", "sigma", "alpha_skew", "flux_fit", "sigma_lsf_ang"))
+    centre = float(frow["best_center"]) if np.isfinite(frow["best_center"]) else mu
     sig_obs, alpha_obs = flp.convolved_skew_params(sig, alpha, s_lsf)
-
-    # Consistency check against the catalogue peak wavelength.
-    if peak_used == "int":
+    if str(frow.get("peak_used", "obs")) == "int":
         peak_air = flp.compute_peak_from_model(mu, sig, alpha)
     else:
         peak_air = flp.compute_peak_from_model(mu, sig_obs, alpha_obs)
-    peak_diff = C_KMS * (peak_air - float(prow["lya_peak_wave"])) / peak_air
+    out["peak_check_kms"] = C_KMS * (peak_air - float(frow["lya_peak_wave"])) / peak_air
 
     grid_air = np.linspace(mu - 12 * sig_obs, mu + 12 * sig_obs, 1500)
     best = flp.skew_model_lsf(grid_air, ftot, mu, sig, alpha, s_lsf)
-    peak = np.nanmax(best)
+    peak = float(np.nanmax(best))
 
-    lo = hi = None
-    n_ok = 0
     if n_mc > 0:
         models = []
         sel = (wave_air >= centre - fit_window) & (wave_air <= centre + fit_window)
         base = flp.skew_model_lsf(wave_air, ftot, mu, sig, alpha, s_lsf)
-        for _ in range(n_mc):
-            fake = flux.copy()
-            fake[sel] = base[sel] + rng.normal(0.0, err[sel])
-            fit = flp.fit_skewed_gaussian(wave_air, fake, var, centre,
-                                          fit_window=fit_window,
-                                          sigma_min=sigma_min,
-                                          alpha_max=alpha_max)
-            if fit["fit_success"]:
-                models.append(flp.skew_model_lsf(grid_air, fit["flux_fit"],
-                                                 fit["mu"], fit["sigma"],
-                                                 fit["alpha_skew"],
-                                                 fit["sigma_lsf_ang"]))
-        n_ok = len(models)
-        if n_ok >= 10:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for _ in range(n_mc):
+                fake = flux.copy()
+                fake[sel] = base[sel] + rng.normal(0.0, err[sel])
+                fit = flp.fit_skewed_gaussian(wave_air, fake, var, centre, fit_window=fit_window,
+                                              sigma_min=sigma_min, alpha_max=alpha_max)
+                if fit["fit_success"]:
+                    models.append(flp.skew_model_lsf(grid_air, fit["flux_fit"], fit["mu"],
+                                                     fit["sigma"], fit["alpha_skew"],
+                                                     fit["sigma_lsf_ang"]))
+        out["n_mc"] = len(models)
+        if len(models) >= 10:
             lo, hi = np.nanpercentile(np.array(models), [16, 84], axis=0)
-            lo, hi = lo / peak, hi / peak
+            out["lo"], out["hi"] = lo / peak, hi / peak
 
-    return dict(
-        wave=flp.air_to_vac(wave_air), flux=flux / peak, err=err / peak,
-        grid=flp.air_to_vac(grid_air), model=best / peak, lo=lo, hi=hi,
-        n_mc=n_ok, peak_check_kms=peak_diff,
-    )
+    out.update(flux=flux / peak, err=err / peak, grid=flp.air_to_vac(grid_air),
+               model=best / peak, has_fit=True, norm=peak)
+    return out
+
+
+def normalise_no_fit(lya):
+    """No Lya fit. Scale the binned data to its brightest pixel in the Lya
+    band, but never by less than 3 sigma, so noise is not blown up to 1."""
+    lo, hi = lya["band_vac"]
+    sel = (lya["wave_d"] >= lo) & (lya["wave_d"] <= hi) & np.isfinite(lya["flux_d"])
+    if not sel.any():
+        norm = 1.0
+    else:
+        norm = max(float(np.nanmax(lya["flux_d"][sel])),
+                   3.0 * float(np.nanmedian(lya["err_d"][sel])))
+    norm = norm if np.isfinite(norm) and norm > 0 else 1.0
+    for k in ("flux", "err", "flux_d", "err_d"):
+        lya[k] = lya[k] / norm
+    lya["norm"] = norm
 
 
 # ---------------------------------------------------------------------------
 # NIRSpec systemic line
 # ---------------------------------------------------------------------------
+def import_lime():
+    try:
+        import lime_fit_lines as lfl
+    except ImportError as e:
+        raise SystemExit(f"Could not import lime_fit_lines ({e}). The systemic refit needs "
+                         "LiMe, so run this in env312, or use --pdf-only to remake the PDFs")
+    return lfl
 
-def run_lime_fit(lime_path, line_key, z_dja, oj, lj):
-    """Repeat the science LiMe fit for one line in one grating.
 
-    Same call sequence as fit_one() in lime_OIII_jointfit.py and
-    fit_one_line() in lime_lines_jointfit.py, built from their own functions:
-    load_lime_spectrum, the band builders, band_in_range, the fit_cfg
-    builders, and get_5007_row / get_line_row with centre_to_redshift for z.
-    Only the figure-writing calls are left out.
+def comp_rest(lfl):
+    return {lfl.L_O3_5007: lfl.OIII_5007, lfl.L_O3_4959: lfl.OIII_4959,
+            lfl.L_HA: lfl.HA, lfl.L_NII_RED: lfl.NII_RED, lfl.L_NII_BLUE: lfl.NII_BLUE}
 
-    Returns (spec, wave, ref_label, component_labels, z_line, snr).
+
+def refit_systemic(lfl, line, path, lrow):
+    """Repeat the lime_fit_lines.py fit of one line in one spectrum.
+
+    The method (joint doublet or single 5007, Halpha single or blend), the
+    input redshift and the band settings come from the lime_<line>_fits.csv
+    row, so nothing is re-decided. Returns the LiMe Spectrum, the data, the
+    main-line label and rest wavelength, the model components and the rest
+    wavelengths that get a systemic marker.
     """
+    a = SimpleNamespace(line_margin=float(lrow["line_margin"]),
+                        cont_gap=float(lrow["cont_gap"]),
+                        cont_width=float(lrow["cont_width"]))
+    z = float(lrow["z_used"])
+    method = str(lrow["method"])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        if line_key == "OIII":
-            spec, wave = oj.load_lime_spectrum(lime_path, z_dja)
-            zf = 1.0 + z_dja
-            spec.fit.continuum(degree_list=CONT_DEGREES, emis_threshold=CONT_THRESH)
-            doublet_band = oj.build_doublet_band()
-            if oj.band_in_range(doublet_band.iloc[0], wave, zf):
-                spec.fit.bands(oj.OIII_BLEND_LABEL, bands=doublet_band,
-                               fit_cfg=oj.build_joint_fit_cfg())
-                comps = [oj.OIII_4959_LABEL, oj.OIII_5007_LABEL]
-            else:
-                spec.fit.bands(oj.OIII_5007_LABEL, bands=oj.single_5007_band())
-                comps = [oj.OIII_5007_LABEL]
-            centre, _, snr = oj.get_5007_row(spec)
-            return (spec, wave, oj.OIII_5007_LABEL, comps,
-                    oj.centre_to_redshift(centre), snr)
-
-        line = next((l for l in lj.LINES if l["name"] == line_key), None)
-        if line is None:
-            raise ValueError(f"{line_key} not in lime_lines_jointfit.LINES")
-        spec, wave = lj.load_lime_spectrum(lime_path, z_dja)
+        spec, wave, flux, err = lfl.load_spectrum(path, z)
         spec.fit.continuum(degree_list=CONT_DEGREES, emis_threshold=CONT_THRESH)
-        if line["kind"] == "single":
-            band = lj.single_band_df(line["label"], line["rest_vac"])
-            spec.fit.bands(line["label"], bands=band)
-            ref, rest, comps = line["label"], line["rest_vac"], [line["label"]]
+        if line == "OIII":
+            ref, rest = lfl.L_O3_5007, lfl.OIII_5007
+            if method == "joint_4959_5007":
+                band = lfl.band_df(lfl.L_O3_5007, lfl.OIII_4959, lfl.OIII_5007, lfl.OIII_5007, a)
+                label = lfl.L_O3_BLEND
+                cfg = {lfl.L_O3_BLEND: f"{lfl.L_O3_4959}+{lfl.L_O3_5007}",
+                       f"{lfl.L_O3_4959}_amp": {"expr": f"{lfl.L_O3_5007}_amp/{lfl.OIII_RATIO_THEORY}"},
+                       f"{lfl.L_O3_4959}_kinem": lfl.L_O3_5007}
+                comps, sys_rest = [lfl.L_O3_5007, lfl.L_O3_4959], [lfl.OIII_4959, lfl.OIII_5007]
+            elif method == "single_5007":
+                band = lfl.band_df(lfl.L_O3_5007, lfl.OIII_5007, lfl.OIII_5007, lfl.OIII_5007, a)
+                label, cfg = lfl.L_O3_5007, None
+                comps, sys_rest = [lfl.L_O3_5007], [lfl.OIII_5007]
+            else:
+                raise ValueError(f"unknown [OIII] method {method}")
+            kw = {"bands": band, "cont_source": lfl.CONT_SOURCE}
+            if cfg is not None:
+                kw["fit_cfg"] = cfg
+            spec.fit.bands(label, **kw)
+        elif line == "Ha":
+            ref, rest = lfl.L_HA, lfl.HA
+            band = lfl.band_df(lfl.L_HA, lfl.HA, lfl.HA, lfl.HA, a)
+            spec.fit.bands(lfl.L_HA, bands=band, cont_source=lfl.CONT_SOURCE)
+            comps, sys_rest = [lfl.L_HA], [lfl.HA]
+            if method == "blend_NII":
+                spec.fit.bands(lfl.L_HA_BLEND, bands=lfl.ha_blend_band(a),
+                               fit_cfg=lfl.ha_blend_cfg(), cont_source=lfl.CONT_SOURCE)
+                comps = [lfl.L_HA, lfl.L_NII_BLUE, lfl.L_NII_RED]
         else:
-            band = lj.doublet_band_df(line["label_blend"], line["rest_vac_other"],
-                                      line["rest_vac_ref"])
-            spec.fit.bands(line["label_blend"], bands=band,
-                           fit_cfg=lj.build_doublet_fit_cfg(line))
-            ref, rest = line["label_ref"], line["rest_vac_ref"]
-            comps = [line["label_other"], line["label_ref"]]
-        centre, _, snr = lj.get_line_row(spec, ref)
-        return spec, wave, ref, comps, lj.centre_to_redshift(centre, rest), snr
+            raise ValueError(f"z_sys line {line} not supported")
+    return spec, wave, flux, err, ref, rest, comps, sys_rest
 
 
-def rest_wavelength(line_key, oj, lj):
-    if line_key == "OIII":
-        return oj.OIII_5007_VAC
-    line = next(l for l in lj.LINES if l["name"] == line_key)
-    return line["rest_vac"] if line["kind"] == "single" else line["rest_vac_ref"]
-
-
-def component_rest(label, oj, lj):
-    """Vacuum rest wavelength for a LiMe component label, taken from the
-    constants in the two LiMe scripts."""
-    if label == oj.OIII_5007_LABEL:
-        return oj.OIII_5007_VAC
-    if label == oj.OIII_4959_LABEL:
-        return oj.OIII_4959_VAC
-    for line in lj.LINES:
-        if line["kind"] == "single" and line["label"] == label:
-            return line["rest_vac"]
-        if line["kind"] == "doublet":
-            if line["label_ref"] == label:
-                return line["rest_vac_ref"]
-            if line["label_other"] == label:
-                return line["rest_vac_other"]
-    raise KeyError(f"No rest wavelength for {label}")
-
-
-def load_systemic(lime_path, line_key, z_dja, z_sys, n_mc, rng, oj, lj,
-                  cont_mode="local"):
-    """Continuum-subtracted NIRSpec spectrum and the LiMe line model,
-    normalised to the peak of the reference-line Gaussian.
-
-    The model is LiMe's own gaussian_model evaluated at each component's
-    fitted amp, center and sigma from spec.frame. The subtracted continuum
-    is the local linear continuum (m_cont, n_cont) LiMe fitted under the line,
-    so data and model share one baseline. cont_mode="global" subtracts the
-    polynomial continuum from spec.fit.continuum instead, which can look
-    flatter far from the line.
-    """
-    from lime.fitting.lines import gaussian_model
-
-    spec, _, ref, comps, z_refit, snr = run_lime_fit(lime_path, line_key,
-                                                     z_dja, oj, lj)
-    with fits.open(lime_path) as hdul:
-        tab = hdul["SPECTRUM"].data
-        wave = np.asarray(tab["WAVE"], dtype=float)
-        flux = np.asarray(tab["FLUX"], dtype=float)
-        err = np.asarray(tab["ERR"], dtype=float)
-    good = np.isfinite(wave) & np.isfinite(flux) & np.isfinite(err)
-    wave, flux, err = wave[good], flux[good], err[good]
-
-    fr = spec.frame
-    r0 = fr.loc[ref]
-    if cont_mode == "global":
-        cw = np.ma.filled(np.ma.asarray(spec.wave, dtype=float), np.nan)
-        cc = np.ma.filled(np.ma.asarray(spec.cont, dtype=float), np.nan) * spec.norm_flux
-        ok = np.isfinite(cw) & np.isfinite(cc)
-        cont = np.interp(wave, cw[ok], cc[ok])
+def load_systemic(lfl, line, path, lrow, z_sys, n_mc, rng):
+    """NIRSpec data minus LiMe's local continuum, and the LiMe model, both
+    normalised to the peak of the main-line Gaussian."""
+    spec, wave, flux, err, ref, rest, comps, sys_rest = refit_systemic(lfl, line, path, lrow)
+    fv = lfl.frame_value
+    m, n = fv(spec, ref, "m_cont"), fv(spec, ref, "n_cont")
+    if np.isfinite(m) and np.isfinite(n):
+        cont = m * wave + n
     else:
-        cont = float(r0["m_cont"]) * wave + float(r0["n_cont"])
-    amp, mu, sig = float(r0["amp"]), float(r0["center"]), float(r0["sigma"])
+        c0 = fv(spec, ref, "cont")
+        cont = np.full_like(wave, c0 if np.isfinite(c0) else 0.0)
 
-    pars = [(float(fr.loc[c, "amp"]), float(fr.loc[c, "center"]),
-             float(fr.loc[c, "sigma"])) for c in comps]
+    pars = [(fv(spec, c, "profile_flux"), fv(spec, c, "center"), fv(spec, c, "sigma"))
+            for c in comps]
+    pars = [p for p in pars if np.all(np.isfinite(p)) and p[2] > 0]
+    f0, c0_, s0 = (fv(spec, ref, k) for k in ("profile_flux", "center", "sigma"))
+    if not (np.isfinite(f0) and np.isfinite(c0_) and np.isfinite(s0) and s0 > 0 and f0 > 0):
+        raise ValueError("LiMe fit of the main line has no usable flux, centre or sigma")
+    amp = f0 / (np.sqrt(2 * np.pi) * s0)
+    z_refit = c0_ / rest - 1.0
 
-    lam_sys = rest_wavelength(line_key, oj, lj) * (1.0 + z_sys)
-    # Systemic wavelength of every fitted component, e.g. both [OIII] lines.
-    lam_comps = sorted(component_rest(c, oj, lj) * (1.0 + z_sys) for c in comps)
-    grid = np.linspace(lam_comps[0] * (1 - 4000 / C_KMS),
-                       lam_comps[-1] * (1 + 4000 / C_KMS), 4000)
-    best = sum(gaussian_model(grid, a, m, s) for a, m, s in pars)
+    rmap = comp_rest(lfl)
+    lam_all = sorted(rmap[c] * (1 + z_sys) for c in comps)
+    grid = np.linspace(lam_all[0] * (1 - 4000 / C_KMS), lam_all[-1] * (1 + 4000 / C_KMS), 4000)
+    best = sum(lfl.gaussian(grid, f, c, s) for f, c, s in pars)
 
     lo = hi = None
     if n_mc > 0:
-        # Approximate band from the LiMe errors on the reference line, other
-        # components scaled with it as their fit ties imply.
-        ae = float(r0["amp_err"]) if np.isfinite(r0["amp_err"]) else 0.0
-        me = float(r0["center_err"]) if np.isfinite(r0["center_err"]) else 0.0
-        se = float(r0["sigma_err"]) if np.isfinite(r0["sigma_err"]) else 0.0
+        # Display band from the errors of the main line, the other components
+        # scaled with it as the fit ties imply.
+        fe, ce, se = (fv(spec, ref, k) for k in ("profile_flux_err", "center_err", "sigma_err"))
+        fe, ce, se = (x if np.isfinite(x) else 0.0 for x in (fe, ce, se))
         draws = []
         for _ in range(n_mc):
-            a_, m_, s_ = (rng.normal(amp, ae), rng.normal(mu, me),
-                          abs(rng.normal(sig, se)))
-            draws.append(sum(gaussian_model(grid, a_ * a / amp, m_ * m / mu,
-                                            s_ * s / sig) for a, m, s in pars))
+            f_, c_, s_ = rng.normal(f0, fe), rng.normal(c0_, ce), abs(rng.normal(s0, se))
+            draws.append(sum(lfl.gaussian(grid, f_ * f / f0, c_ * c / c0_, s_ * s / s0)
+                             for f, c, s in pars))
         lo, hi = np.nanpercentile(np.array(draws), [16, 84], axis=0)
         lo, hi = lo / amp, hi / amp
 
-    return dict(
-        wave=wave, flux=(flux - cont) / amp, err=err / amp,
-        grid=grid, model=best / amp, lo=lo, hi=hi,
-        z_refit=z_refit, snr=snr, rest=rest_wavelength(line_key, oj, lj),
-        lam_comps=lam_comps,
-    )
+    return dict(wave=wave, flux=(flux - cont) / amp, err=err / amp, grid=grid,
+                model=best / amp, lo=lo, hi=hi, z_refit=z_refit, rest=rest,
+                lam_sys_lines=sorted(r * (1 + z_sys) for r in sys_rest),
+                blend=line == "Ha" and len(comps) > 1)
 
 
 # ---------------------------------------------------------------------------
 # Figures
 # ---------------------------------------------------------------------------
-
 def add_top_velocity(ax, lam_sys):
     top = ax.secondary_xaxis("top", functions=(
         lambda w: v_from_wave(w, lam_sys), lambda v: wave_from_v(v, lam_sys)))
@@ -446,11 +433,7 @@ def add_top_velocity(ax, lam_sys):
 
 def draw_panel(ax, s, lam_sys, vrange, text_lines, peak_wave=None,
                label_systemic=True, extra_sys=(), text_x=0.04, text_ha="left"):
-    """One spectrum panel in wavelength space with a velocity axis on top.
-
-    lam_sys sets v = 0 on the top axis. extra_sys are further systemic
-    wavelengths (e.g. [OIII] 4959) that also get a red dashed line.
-    """
+    """One spectrum panel in wavelength with a velocity axis on top."""
     w_lo, w_hi = wave_from_v(vrange[0], lam_sys), wave_from_v(vrange[1], lam_sys)
     inw = (s["wave_d"] >= w_lo) & (s["wave_d"] <= w_hi)
 
@@ -458,13 +441,12 @@ def draw_panel(ax, s, lam_sys, vrange, text_lines, peak_wave=None,
                     color=COL_NOISE_FILL, alpha=0.45, lw=0.6,
                     edgecolor=COL_NOISE_EDGE, zorder=1)
     ax.axhline(0.0, color="k", ls="--", lw=0.6, zorder=2)
-    ax.step(s["wave_d"], s["flux_d"], where="mid", color=COL_DATA, lw=0.9,
-            zorder=3)
-
+    ax.step(s["wave_d"], s["flux_d"], where="mid", color=COL_DATA, lw=0.9, zorder=3)
     if s["lo"] is not None:
         ax.fill_between(s["grid"], s["lo"], s["hi"], color=COL_MODEL_BAND,
                         alpha=0.5, lw=0, zorder=4)
-    ax.plot(s["grid"], s["model"], color=COL_MODEL, ls="--", lw=1.1, zorder=5)
+    if s["model"] is not None:
+        ax.plot(s["grid"], s["model"], color=COL_MODEL, ls="--", lw=1.1, zorder=5)
 
     for lam in (lam_sys, *extra_sys):
         ax.axvline(lam, color=COL_SYS, ls="--", lw=1.2, zorder=6)
@@ -474,71 +456,54 @@ def draw_panel(ax, s, lam_sys, vrange, text_lines, peak_wave=None,
     ax.set_xlim(w_lo, w_hi)
     ylo, yhi = y_limits([s["flux_d"][inw]], [s["err_d"][inw]])
     ax.set_ylim(ylo, yhi)
-
     if label_systemic:
-        ax.text(lam_sys - 0.012 * (w_hi - w_lo), ylo + 0.62 * (yhi - ylo),
-                "systemic", rotation=90, ha="right", va="center",
-                color="0.45", fontsize=8, zorder=7,
-                bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none",
-                          alpha=0.7))
-
-    ax.text(text_x, 0.95, "\n".join(text_lines), transform=ax.transAxes,
-            va="top", ha=text_ha, multialignment="left", fontsize=8.5,
-            linespacing=1.5, zorder=8)
+        ax.text(lam_sys - 0.012 * (w_hi - w_lo), ylo + 0.62 * (yhi - ylo), "systemic",
+                rotation=90, ha="right", va="center", color="0.45", fontsize=8, zorder=7,
+                bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none", alpha=0.7))
+    ax.text(text_x, 0.95, "\n".join(text_lines), transform=ax.transAxes, va="top",
+            ha=text_ha, multialignment="left", fontsize=8.5, linespacing=1.5, zorder=8)
     ax.set_xlabel(r"Observed wavelength (vacuum) [$\rm \AA$]")
     add_top_velocity(ax, lam_sys)
 
 
-def systemic_vrange(sysl, lam_ref, vr_single, pad):
-    """Velocity window for the systemic panel, about lam_ref (v = 0).
-
-    One component: vr_single as given. Several components (the [OIII]
-    doublet): from the bluest line minus pad to the reddest line plus pad, so
-    the window is centred on the midpoint and both lines sit equidistant from
-    the panel centre.
-    """
-    lams = sysl["lam_comps"]
-    if len(lams) < 2:
-        return vr_single
-    v = v_from_wave(np.array(lams), lam_ref)
-    return [float(v.min()) - pad, float(v.max()) + pad]
+def dv_text(src):
+    if not np.isfinite(src["delta_v"]):
+        return r"no Ly$\alpha$ fit"
+    if np.isfinite(src["delta_v_err"]):
+        return (rf"$\Delta v = {src['delta_v']:.0f} \pm {src['delta_v_err']:.0f}$"
+                r" km s$^{-1}$")
+    return rf"$\Delta v = {src['delta_v']:.0f}$ km s$^{{-1}}$"
 
 
 def figure_panels(src, lya, sysl, out_path, vr_lya, vr_sys, dpi, doublet_pad):
     fig, axes = plt.subplots(1, 2, figsize=(MNRAS_PAGE_WIDTH_IN, 2.9))
-
-    dv_txt = (rf"$\Delta v = {src['delta_v']:.0f} \pm {src['delta_v_err']:.0f}$"
-              r" km s$^{-1}$")
     draw_panel(axes[0], lya, src["lam_lya_sys"], vr_lya,
-               [f"ID {src['ID']}", dv_txt, rf"S/N = {src['lya_snr']:.1f}"],
+               [f"ID {src['ID']}", dv_text(src), rf"S/N = {src['lya_snr']:.1f}"],
                peak_wave=src["lam_lya_peak"])
     axes[0].set_ylabel("Normalised flux")
     axes[0].text(0.96, 0.95, r"MUSE Ly$\alpha$", transform=axes[0].transAxes,
                  ha="right", va="top", fontsize=8.5)
 
-    extra = [l for l in sysl["lam_comps"]
-             if abs(l - src["lam_line_sys"]) > 1e-6 * src["lam_line_sys"]]
-    vr = systemic_vrange(sysl, src["lam_line_sys"], vr_sys, doublet_pad)
+    lams = sysl["lam_sys_lines"]
+    extra = [l for l in lams if abs(l - src["lam_line_sys"]) > 1e-6 * src["lam_line_sys"]]
     info = [f"ID {src['ID']}", rf"$z_{{\rm sys}} = {src['z_sys']:.4f}$",
             rf"S/N = {src['z_sys_snr']:.1f}"]
-    label = f"NIRSpec {src['tex']}\n{src['grating']}"
     if extra:
-        # Doublet. The only clear space is between the two lines, so the
-        # info and the instrument label go there as one block, centred in the
-        # gap. Both [OIII] lines are shown, so the label drops the 5007.
-        v_lines = v_from_wave(np.array(sysl["lam_comps"]), src["lam_line_sys"])
-        x_mid = (0.5 * (v_lines.min() + v_lines.max()) - vr[0]) / (vr[1] - vr[0])
+        # [OIII] doublet. The clear space is between the lines, so the text
+        # goes there, centred, and the label drops the 5007.
+        v_l = v_from_wave(np.array(lams), src["lam_line_sys"])
+        vr = [float(v_l.min()) - doublet_pad, float(v_l.max()) + doublet_pad]
+        x_mid = (0.5 * (v_l.min() + v_l.max()) - vr[0]) / (vr[1] - vr[0])
         tex_pair = src["tex"].split(r"$\,\lambda")[0]
         draw_panel(axes[1], sysl, src["lam_line_sys"], vr,
                    info + [f"NIRSpec {tex_pair}", src["grating"]],
-                   label_systemic=False, extra_sys=extra, text_x=x_mid,
-                   text_ha="center")
+                   label_systemic=False, extra_sys=extra, text_x=x_mid, text_ha="center")
     else:
-        draw_panel(axes[1], sysl, src["lam_line_sys"], vr, info,
-                   label_systemic=False)
-        axes[1].text(0.96, 0.95, label, transform=axes[1].transAxes,
-                     ha="right", va="top", fontsize=8.5, linespacing=1.4)
-
+        draw_panel(axes[1], sysl, src["lam_line_sys"], vr_sys, info, label_systemic=False)
+        tex = src["tex"] + (r" + [N$\,$II]" if sysl["blend"] else "")
+        axes[1].text(0.96, 0.95, f"NIRSpec {tex}\n{src['grating']}",
+                     transform=axes[1].transAxes, ha="right", va="top", fontsize=8.5,
+                     linespacing=1.4)
     fig.tight_layout(w_pad=1.5)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -546,7 +511,6 @@ def figure_panels(src, lya, sysl, out_path, vr_lya, vr_sys, dpi, doublet_pad):
 
 def figure_overlay(src, lya, sysl, out_path, vrange, show_fits, dpi):
     fig, ax = plt.subplots(figsize=(MNRAS_COL_WIDTH_IN, 2.8))
-
     v_lya = v_from_wave(lya["wave_d"], src["lam_lya_sys"])
     v_sys = v_from_wave(sysl["wave_d"], src["lam_line_sys"])
 
@@ -556,276 +520,309 @@ def figure_overlay(src, lya, sysl, out_path, vrange, show_fits, dpi):
     ax.step(v_sys, sysl["flux_d"], where="mid", color=COL_OV_SYS, lw=1.4,
             label=f"{src['tex']} (NIRSpec)", zorder=2)
     if show_fits:
-        ax.plot(v_from_wave(lya["grid"], src["lam_lya_sys"]), lya["model"],
-                color=COL_OV_LYA, lw=0.9, alpha=0.6, zorder=4)
+        if lya["model"] is not None:
+            ax.plot(v_from_wave(lya["grid"], src["lam_lya_sys"]), lya["model"],
+                    color=COL_OV_LYA, lw=0.9, alpha=0.6, zorder=4)
         ax.plot(v_from_wave(sysl["grid"], src["lam_line_sys"]), sysl["model"],
                 color=COL_OV_SYS, lw=0.9, alpha=0.6, zorder=4)
 
     ax.set_xlim(*vrange)
     m_lya = (v_lya >= vrange[0]) & (v_lya <= vrange[1])
     m_sys = (v_sys >= vrange[0]) & (v_sys <= vrange[1])
-    ylo, yhi = y_limits([lya["flux_d"][m_lya], sysl["flux_d"][m_sys]],
-                        [None, None])
+    ylo, yhi = y_limits([lya["flux_d"][m_lya], sysl["flux_d"][m_sys]], [None, None])
     yhi = yhi + 0.15 * (yhi - ylo)
     ax.set_ylim(ylo, yhi)
 
-    ax.axvline(0.0, color=COL_OV_SYS, ls="--", lw=1.1, zorder=5)
-    ax.axvline(src["delta_v"], color=COL_OV_LYA, ls="--", lw=1.1, zorder=5)
-
-    # Labels just inside the top of the panel, systemic to the left of its
-    # line and the Lya peak to the right of its line so they never collide.
     dx = 0.012 * (vrange[1] - vrange[0])
     ytxt = yhi - 0.04 * (yhi - ylo)
-    ax.text(-dx, ytxt, "systemic", color=COL_OV_SYS, fontsize=7.5,
-            ha="right", va="top")
-    ax.text(src["delta_v"] + dx, ytxt, r"Ly$\alpha$ peak", color=COL_OV_LYA,
-            fontsize=7.5, ha="left", va="top")
+    ax.axvline(0.0, color=COL_OV_SYS, ls="--", lw=1.1, zorder=5)
+    ax.text(-dx, ytxt, "systemic", color=COL_OV_SYS, fontsize=7.5, ha="right", va="top")
+    if np.isfinite(src["delta_v"]):
+        ax.axvline(src["delta_v"], color=COL_OV_LYA, ls="--", lw=1.1, zorder=5)
+        ax.text(src["delta_v"] + dx, ytxt, r"Ly$\alpha$ peak", color=COL_OV_LYA,
+                fontsize=7.5, ha="left", va="top")
 
-    ax.set_title(
-        f"ID {src['ID']}   " + rf"$z_{{\rm sys}} = {src['z_sys']:.4f}$   "
-        + rf"$\Delta v = {src['delta_v']:.0f} \pm {src['delta_v_err']:.0f}$ km s$^{{-1}}$",
-        fontsize=8, pad=18)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2,
-              frameon=False, handlelength=1.5, columnspacing=1.2)
+    ax.set_title(f"ID {src['ID']}   " + rf"$z_{{\rm sys}} = {src['z_sys']:.4f}$   "
+                 + dv_text(src), fontsize=8, pad=18)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False,
+              handlelength=1.5, columnspacing=1.2)
     ax.set_xlabel(r"Velocity relative to systemic [km s$^{-1}$]")
     ax.set_ylabel("Normalised flux")
     ax.tick_params(top=True)
-
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
+# One source
+# ---------------------------------------------------------------------------
+def make_source(sid, row, frow, lrow, lfl, a):
+    """Both figures for one source. Returns (status, message), status is
+    "ok", "warn" (LiMe refit off the catalogue z_sys) or "fail"."""
+    line, g = str(row["z_sys_line"]), str(row["z_sys_grating"])
+    if line not in LINE_TEX:
+        return "fail", f"z_sys line {line} not supported"
+    if lrow is None:
+        return "fail", f"no fitted {g} row in lime_{line}_fits.csv"
+    gfull = f"{g}_{GRATING_FILTER[g]}"
+    lime_path = os.path.join(a.spectra_root, gfull, f"{sid}_{gfull}_spectra_lime.fits")
+    npz_path = pc.muse_path(sid, "spectrum", a.subcube_dir)
+    for p in (lime_path, npz_path):
+        if not os.path.exists(p):
+            return "fail", f"missing {p}"
+
+    z_sys = float(row["z_sys"])
+    rng = np.random.default_rng(a.seed + sid)
+    lya = load_lya(npz_path, frow, z_sys, a.n_mc, rng, a.fit_window, a.sigma_min,
+                   a.alpha_max, a.dv_blue, a.dv_red)
+    try:
+        sysl = load_systemic(lfl, line, lime_path, lrow, z_sys, a.n_mc, rng)
+    except Exception as e:
+        return "fail", f"LiMe refit failed: {e}"
+
+    dv_refit = C_KMS * (sysl["z_refit"] - z_sys) / (1.0 + z_sys)
+    warn = abs(dv_refit) > a.refit_tol
+    lam_lya_sys = LYA_REST * (1.0 + z_sys)
+    lam_line_sys = sysl["rest"] * (1.0 + z_sys)
+    delta_v = float(row["delta_v"]) if lya["has_fit"] else np.nan
+
+    v_pix_nir = pixel_kms(sysl["wave"], lam_line_sys)
+    v_pix_muse = pixel_kms(lya["wave"], lam_lya_sys)
+    mbin = a.muse_bin if a.muse_bin is not None else max(1, int(round(v_pix_nir / v_pix_muse)))
+    lya["wave_d"], lya["flux_d"], lya["err_d"] = rebin(lya["wave"], lya["flux"], lya["err"], mbin)
+    sysl["wave_d"], sysl["flux_d"], sysl["err_d"] = sysl["wave"], sysl["flux"], sysl["err"]
+    if not lya["has_fit"]:
+        normalise_no_fit(lya)
+
+    src = dict(ID=sid, z_sys=z_sys, tex=LINE_TEX[line], grating=gfull,
+               lya_snr=float(row["lya_snr"]), z_sys_snr=float(row["z_sys_snr"]),
+               delta_v=delta_v, delta_v_err=float(row["delta_v_err"]),
+               lam_lya_sys=lam_lya_sys, lam_line_sys=lam_line_sys,
+               lam_lya_peak=wave_from_v(delta_v, lam_lya_sys) if np.isfinite(delta_v) else None)
+
+    p1 = pc.muse_path(sid, "systemic_panels_png", a.subcube_dir)
+    p2 = pc.muse_path(sid, "systemic_overlay_png", a.subcube_dir)
+    figure_panels(src, lya, sysl, p1, a.lya_vrange, a.sys_vrange, a.dpi, a.doublet_pad)
+    figure_overlay(src, lya, sysl, p2, a.overlay_vrange, not a.no_overlay_fits, a.dpi)
+
+    msg = (f"{line} {gfull}, LiMe refit {dv_refit:+.2f} km/s from z_sys"
+           + (f" WARNING above {a.refit_tol:g}" if warn else "")
+           + (f", Lya peak check {lya['peak_check_kms']:+.2f} km/s, MC {lya['n_mc']}/{a.n_mc}"
+              if lya["has_fit"] else ", no Lya fit")
+           + f", MUSE bin x{mbin}\n         {p1}\n         {p2}")
+    return ("warn" if warn else "ok"), msg
+
+
+# ---------------------------------------------------------------------------
+# PDFs
+# ---------------------------------------------------------------------------
+def caption(r):
+    parts = [f"ID {int(r['ID'])}", rf"$\Sigma$ = {r['lya_snr']:.2f}",
+             f"z_sys = {r['z_sys']:.4f}"]
+    if pd.notna(r["delta_v"]):
+        parts.append(rf"$\Delta v$ = {r['delta_v']:.0f} km/s")
+    return "    ".join(parts)
+
+
+def summary_page(pdf, title, subtitle, rows, untested, missing_note):
+    fig = plt.figure(figsize=A4)
+    fig.text(0.08, 0.95, title, fontsize=14, weight="bold", va="top")
+    fig.text(0.08, 0.92, subtitle, fontsize=10, va="top")
+    lines = [f"{int(r['ID']):>6d}   {r['lya_snr']:6.2f}" for _, r in rows.iterrows()]
+    ncol = 3
+    per_col = int(np.ceil(len(lines) / ncol)) if lines else 0
+    for c in range(ncol):
+        chunk = lines[c * per_col:(c + 1) * per_col]
+        fig.text(0.08 + c * 0.3, 0.88, "    ID      S/N\n" + "\n".join(chunk),
+                 family="monospace", fontsize=8, va="top")
+    foot = []
+    if untested:
+        foot.append("Not tested for Lya, in neither PDF: " + ", ".join(map(str, untested)))
+    if missing_note:
+        foot.append(missing_note)
+    if foot:
+        fig.text(0.08, 0.06, "\n".join(foot), fontsize=8, va="bottom", wrap=True)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def write_pdf(path, kind, title, subtitle, rows, untested, a):
+    """kind 'panels' (4 per page, one column) or 'overlay' (8 per page)."""
+    key = "systemic_panels_png" if kind == "panels" else "systemic_overlay_png"
+    nrow, ncol = (4, 1) if kind == "panels" else (4, 2)
+    per_page = nrow * ncol
+    missing = [int(i) for i in rows["ID"]
+               if not os.path.exists(pc.muse_path(int(i), key, a.subcube_dir))]
+    note = f"No figure (see the run log): {', '.join(map(str, missing))}" if missing else ""
+    with PdfPages(path) as pdf:
+        summary_page(pdf, title, subtitle, rows, untested, note)
+        for start in range(0, len(rows), per_page):
+            chunk = rows.iloc[start:start + per_page]
+            fig, axes = plt.subplots(nrow, ncol, figsize=A4)
+            axes = np.atleast_1d(axes).ravel()
+            for ax, (_, r) in zip(axes, chunk.iterrows()):
+                png = pc.muse_path(int(r["ID"]), key, a.subcube_dir)
+                if os.path.exists(png):
+                    ax.imshow(load_png(png, a.width_px))
+                else:
+                    ax.text(0.5, 0.5, f"no figure\n{png}", ha="center", va="center",
+                            fontsize=6, transform=ax.transAxes)
+                ax.set_title(caption(r), fontsize=7 if kind == "overlay" else 8, loc="left")
+                ax.set_axis_off()
+            for ax in axes[len(chunk):]:
+                ax.set_axis_off()
+            fig.tight_layout(h_pad=0.6)
+            pdf.savefig(fig, dpi=150)
+            plt.close(fig)
+    return missing
+
+
+def make_pdfs(cat, flag, a):
+    if flag not in cat.columns:
+        have = [c for c in cat.columns if c.startswith("det_")]
+        raise SystemExit(f"No {flag} in {a.catalog}. It has {have}. Add levels with "
+                         "build_lya_catalog.py --levels")
+    thr_txt = ""
+    pcol = "p" + flag[len("det_"):]
+    if os.path.exists(a.thresholds):
+        thr = pd.read_csv(a.thresholds).iloc[0]
+        if pcol in thr:
+            thr_txt = rf", threshold $\Sigma$ = {float(thr[pcol]):.2f}"
+    pct = flag[len("det_"):].replace("_", ".")
+    tested = cat[cat["lya_status"] == "ok"].sort_values("lya_snr", ascending=False)
+    untested = cat.loc[cat["lya_status"] != "ok", "ID"].astype(int).tolist()
+    groups = {"detections": tested[tested[flag] == 1],
+              "non_detections": tested[tested[flag] == 0]}
+    os.makedirs(a.outdir, exist_ok=True)
+    thr_plain = thr_txt.replace(r"$\Sigma$", "Sigma")
+    print(f"\nPDFs, detection = {flag} (Sigma_Lya above the pooled {pct}th percentile"
+          f"{thr_plain})")
+    for kind in ("panels", "overlay"):
+        for name, rows in groups.items():
+            path = os.path.join(os.path.abspath(a.outdir), f"lya_systemic_{kind}_{flag}_{name}.pdf")
+            title = f"Lya vs systemic ({kind}), {name.replace('_', '-')}"
+            sub = (f"{flag}: above the {pct}th percentile{thr_txt}. "
+                   f"{len(rows)} sources, sorted by S/N")
+            missing = write_pdf(path, kind, title, sub, rows, untested, a)
+            print(f"  {kind:<8} {name:<15} {len(rows):>3d} sources  {path}")
+            if missing:
+                print(f"           WARNING no figure for {missing}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def parse_args():
-    here = os.path.dirname(os.path.abspath(__file__))
-    p = argparse.ArgumentParser(description="Per-source Lya vs systemic-line figures.")
-    p.add_argument("--id", type=int, default=None, help="Run one source only.")
-    p.add_argument("--group", default=None,
-                   help="Restrict to IDs in lya_group_<group>.csv (e.g. a).")
-    p.add_argument("--group-dir", default=f"{P2}/MUSE_catalogs")
-    p.add_argument("--delta-v-csv",
-                   default=f"{P2}/MUSE_catalogs/delta_v_from_best_zsys_line.csv")
-    p.add_argument("--properties-csv",
-                   default=f"{P2}/MUSE_catalogs/lya_properties_mc.csv")
-    p.add_argument("--systemic-csv",
-                   default=f"{P2}/jwst_catalogs/systemic_redshifts_by_JELS_ID.csv")
-    p.add_argument("--catalog-dir", default=f"{P2}/jwst_catalogs",
-                   help="Holds <line>_results_by_JELS_ID.csv.")
-    p.add_argument("--muse-spec-dir", default=f"{P2}/MUSE_subcubes/dataproducts",
-                   help="Holds {ID}_spectrum.npz.")
-    p.add_argument("--spectra-root", default=f"{P2}/jwst_spectra",
-                   help="Holds <grating>/<ID>_<grating>_spectra_lime.fits.")
-    p.add_argument("--outroot", default=f"{P2}/plots",
-                   help="Figures go to <outroot>/<ID>/.")
-    p.add_argument("--scripts-dir", default=here,
-                   help="Directory holding fit_lya_properties_grating.py, "
-                        "lime_OIII_jointfit.py and lime_lines_jointfit.py.")
-    p.add_argument("--lya-vrange", type=float, nargs=2, default=[-1500, 1500],
-                   help="Left panel velocity range about systemic, km/s.")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--catalog", default=pc.LYA_CATALOG)
+    p.add_argument("--zsys", default=pc.ZSYS_CATALOG)
+    p.add_argument("--fits-csv", default=f"{CAT}/lya_fits_mc.csv")
+    p.add_argument("--thresholds", default=f"{CAT}/lya_false_pos_thresholds.csv")
+    p.add_argument("--lime-dir", default=f"{P2}/jwst_catalogs",
+                   help="holds lime_<line>_fits.csv")
+    p.add_argument("--spectra-root", default=f"{P2}/jwst_spectra_pm")
+    p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
+    p.add_argument("--outdir", default=f"{P2}/plots/lya_systemic_pdfs")
+    p.add_argument("--ids", type=int, nargs="+", default=None)
+    p.add_argument("--detection", default="det_98",
+                   help="flag column that defines a detection, det_99_5, det_98, det_95 "
+                        "(or 99.5, 98, 95). It is written into the PDF names")
+    p.add_argument("--pdf-only", action="store_true",
+                   help="only remake the PDFs from the existing figures (no LiMe needed)")
+    p.add_argument("--no-pdf", action="store_true")
+    p.add_argument("--lya-vrange", type=float, nargs=2, default=[-1500, 1500])
     p.add_argument("--sys-vrange", type=float, nargs=2, default=[-3500, 3500],
-                   help="Right panel velocity range for single lines (Ha), km/s.")
+                   help="right panel range for Halpha, km/s")
     p.add_argument("--doublet-pad", type=float, default=1500.0,
-                   help="For the [OIII] doublet, km/s shown beyond 4959 on the "
-                        "blue side and beyond 5007 on the red side. The panel "
-                        "is centred on the midpoint of the two lines.")
+                   help="km/s beyond 4959 and 5007 for the [OIII] doublet panel")
     p.add_argument("--overlay-vrange", type=float, nargs=2, default=[-1500, 1500])
-    p.add_argument("--muse-bin", type=int, default=None,
-                   help="MUSE display rebin factor. Default matches NIRSpec pixel km/s.")
-    p.add_argument("--nirspec-bin", type=int, default=1)
-    p.add_argument("--sys-cont", choices=["local", "global"], default="local",
-                   help="NIRSpec continuum to subtract. local is the linear "
-                        "continuum LiMe fitted under the line (matches the "
-                        "model baseline), global is the polynomial from "
-                        "spec.fit.continuum.")
+    p.add_argument("--muse-bin", type=int, default=None)
+    p.add_argument("--dv-blue", type=float, default=300.0,
+                   help="Lya band for the no-fit normalisation, as the S/N search")
+    p.add_argument("--dv-red", type=float, default=1200.0)
     p.add_argument("--n-mc", type=int, default=100,
-                   help="Realisations for the grey 1 sigma model bands. "
-                        "0 turns the bands off and speeds the run up.")
-    p.add_argument("--fit-window", type=float, default=25.0,
-                   help="Lya fit half-window, AA. Must match the science run.")
-    p.add_argument("--sigma-min", type=float, default=None,
-                   help="Must match the science run. Default is the fitter's "
-                        "SIGMA_MIN_DEFAULT (0.1 AA, intrinsic sigma).")
-    p.add_argument("--alpha-max", type=float, default=None,
-                   help="Must match the science run. Default is the fitter's "
-                        "ALPHA_MAX_DEFAULT (15).")
-    p.add_argument("--refit-tol", type=float, default=1.0,
-                   help="Warn if the repeated LiMe fit differs from catalogue "
-                        "z_sys by more than this, km/s. It should agree "
-                        "exactly unless the source was refitted by hand.")
-    p.add_argument("--no-overlay-fits", action="store_true",
-                   help="Leave the model curves off the overlay figure.")
+                   help="refits for the grey model bands, 0 turns them off")
+    p.add_argument("--fit-window", type=float, default=25.0)
+    p.add_argument("--sigma-min", type=float, default=flp.SIGMA_MIN_DEFAULT)
+    p.add_argument("--alpha-max", type=float, default=flp.ALPHA_MAX_DEFAULT)
+    p.add_argument("--refit-tol", type=float, default=1.0)
+    p.add_argument("--no-overlay-fits", action="store_true")
     p.add_argument("--dpi", type=int, default=300)
+    p.add_argument("--width-px", type=int, default=2000,
+                   help="figures are shrunk to this width in the PDFs")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
 
 def main():
-    args = parse_args()
-    rng = np.random.default_rng(args.seed)
-    flp, oj, lj = import_pipeline(args.scripts_dir)
-    if args.sigma_min is None:
-        args.sigma_min = flp.SIGMA_MIN_DEFAULT
-    if args.alpha_max is None:
-        args.alpha_max = flp.ALPHA_MAX_DEFAULT
-    # Point the LiMe modules at the chosen catalogue directory.
-    oj.CATALOG_DIR = lj.CATALOG_DIR = os.path.abspath(args.catalog_dir)
+    a = parse_args()
+    flag = flag_name(a.detection)
+    print("plot_lya_vs_systemic.py")
+    for k in ("catalog", "zsys", "fits_csv", "thresholds", "lime_dir", "spectra_root",
+              "subcube_dir", "outdir"):
+        setattr(a, k, os.path.abspath(getattr(a, k)))
+        print(f"  {k:<13} {getattr(a, k)}")
+    print(f"  figures       {a.subcube_dir}/<ID>/<ID>_lya_systemic_panels.png, "
+          "<ID>_lya_systemic_overlay.png")
+    print(f"  detection     {flag}")
 
-    paths = {k: os.path.abspath(getattr(args, k)) for k in
-             ("delta_v_csv", "properties_csv", "systemic_csv", "catalog_dir",
-              "muse_spec_dir", "spectra_root", "outroot")}
-    print("[CONFIG]")
-    for k, v in paths.items():
-        print(f"  {k:<15} {v}")
-    print("")
+    cat = pd.read_csv(a.catalog)
+    cat["ID"] = cat["ID"].astype(int)
+    zs = pd.read_csv(a.zsys)[["ID", "z_sys_line", "z_sys_snr"]]
+    zs["ID"] = zs["ID"].astype(int)
+    cat = cat.merge(zs, on="ID", how="left")
+    if a.ids:
+        miss = sorted(set(a.ids) - set(cat["ID"]))
+        if miss:
+            print(f"  not in the catalogue: {miss}")
+        cat = cat[cat["ID"].isin(a.ids)]
+    print(f"  {len(cat)} sources")
 
-    dv = pd.read_csv(paths["delta_v_csv"])
-    props = pd.read_csv(paths["properties_csv"])
-    systemic = pd.read_csv(paths["systemic_csv"])
-    for df in (dv, props, systemic):
-        df["ID"] = df["ID"].astype(int)
-    props = props.set_index("ID")
-    systemic = systemic.set_index("ID")
+    if not a.pdf_only:
+        lfl = import_lime()
+        fits = pd.read_csv(a.fits_csv)
+        fits["ID"] = fits["ID"].astype(int)
+        fits = fits.set_index("ID")
+        lime = {}
+        for line in sorted(cat["z_sys_line"].dropna().unique()):
+            path = os.path.join(a.lime_dir, f"lime_{line}_fits.csv")
+            print(f"  reading       {path}")
+            d = pd.read_csv(path)
+            d["ID"] = d["ID"].astype(int)
+            lime[line] = d[d["status"] == "fitted"].set_index(["ID", "grating"])
+        print("")
 
-    ids = dv.loc[dv["z_sys_line"].notna(), "ID"].tolist()
-    if args.group is not None:
-        gpath = os.path.abspath(os.path.join(args.group_dir,
-                                             f"lya_group_{args.group}.csv"))
-        keep = set(pd.read_csv(gpath)["ID"].astype(int))
-        ids = [i for i in ids if i in keep]
-        print(f"group {args.group}: {gpath}")
-    if args.id is not None:
-        ids = [args.id]
-    dv = dv.set_index("ID")
+        done, failed, warned = [], [], []
+        for _, row in cat.sort_values("ID").iterrows():
+            sid = int(row["ID"])
+            frow = fits.loc[sid] if sid in fits.index else None
+            key = (sid, str(row["z_sys_grating"]))
+            line = str(row["z_sys_line"])
+            lrow = lime[line].loc[key] if line in lime and key in lime[line].index else None
+            if isinstance(lrow, pd.DataFrame):
+                lrow = lrow.iloc[0]
+            try:
+                status, msg = make_source(sid, row, frow, lrow, lfl, a)
+            except Exception as e:
+                status, msg = "fail", f"FAILED {e}"
+            print(f"  {sid}  {msg}", flush=True)
+            if status == "fail":
+                failed.append(sid)
+            else:
+                done.append(sid)
+                if status == "warn":
+                    warned.append(sid)
+        print(f"\n{len(done)} sources plotted (2 figures each)")
+        if failed:
+            print(f"  no figures   {failed}")
+        if warned:
+            print(f"  LiMe refit off the catalogue z_sys by more than {a.refit_tol:g} km/s "
+                  f"(refitted by hand?)  {warned}")
 
-    results_cache, dja_cache = {}, {}
-    written, skipped, warned = [], [], []
-
-    for sid in ids:
-        print(f"--- ID {sid} ---")
-        if sid not in dv.index or pd.isna(dv.loc[sid, "z_sys_line"]):
-            print("  [SKIP] no systemic line in delta_v csv")
-            skipped.append(sid)
-            continue
-        drow = dv.loc[sid]
-        line = str(drow["z_sys_line"])
-        if line not in LINE_TEX:
-            print(f"  [SKIP] systemic line {line} not supported here")
-            skipped.append(sid)
-            continue
-        if sid not in props.index or not bool(props.loc[sid, "fit_success"]):
-            print("  [SKIP] no successful Lya fit")
-            skipped.append(sid)
-            continue
-        prow = props.loc[sid]
-
-        g_short = systemic.loc[sid, f"z_{line}_grating"] if sid in systemic.index else np.nan
-        if pd.isna(g_short):
-            print(f"  [SKIP] no grating recorded for {line}")
-            skipped.append(sid)
-            continue
-        g_full = GRATING_FULL[str(g_short)]
-        lime_path = os.path.join(paths["spectra_root"], g_full,
-                                 f"{sid}_{g_full}_spectra_lime.fits")
-        npz_path = os.path.join(paths["muse_spec_dir"], f"{sid}_spectrum.npz")
-        missing = [p for p in (lime_path, npz_path) if not os.path.exists(p)]
-        if missing:
-            print(f"  [SKIP] missing {missing}")
-            skipped.append(sid)
-            continue
-
-        z_sys = float(drow["z_sys"])
-        # DJA z of that grating places the LiMe band, as in the science run.
-        # Read from the DJA match catalogue with the pipeline's own function,
-        # falling back to the z_<grating> column of the line results CSV
-        # (which holds the same value).
-        z_band = np.nan
-        cpath = oj.catalogue_path(g_full)
-        if g_full not in dja_cache:
-            dja_cache[g_full] = Table.read(cpath) if os.path.exists(cpath) else None
-        if dja_cache[g_full] is not None:
-            zd = oj.get_dja_redshift(dja_cache[g_full], sid)
-            z_band = np.nan if zd is None else zd
-        if line not in results_cache:
-            rp = os.path.join(paths["catalog_dir"], f"{line}_results_by_JELS_ID.csv")
-            results_cache[line] = (pd.read_csv(rp).assign(ID=lambda d: d["ID"].astype(int))
-                                   .set_index("ID") if os.path.exists(rp) else None)
-        res = results_cache[line]
-        if not np.isfinite(z_band) and res is not None and sid in res.index and f"z_{g_short}" in res.columns:
-            z_band = pd.to_numeric(res.loc[sid, f"z_{g_short}"], errors="coerce")
-        if not np.isfinite(z_band):
-            z_band = z_sys
-
-        try:
-            lya = load_lya(npz_path, prow, flp, args.n_mc, rng, args.fit_window,
-                           args.sigma_min, args.alpha_max)
-            sysl = load_systemic(lime_path, line, float(z_band), z_sys,
-                                 args.n_mc, rng, oj, lj, args.sys_cont)
-        except Exception as exc:
-            print(f"  [SKIP] fit or load failed: {exc}")
-            skipped.append(sid)
-            continue
-
-        dv_refit = C_KMS * (sysl["z_refit"] - z_sys) / (1.0 + z_sys)
-        print(f"  line {line} ({g_full}), z_sys {z_sys:.6f}, "
-              f"LiMe fit {sysl['z_refit']:.6f} ({dv_refit:+.2f} km/s)")
-        print(f"  Lya model peak vs catalogue lya_peak_wave "
-              f"{lya['peak_check_kms']:+.2f} km/s")
-        if abs(dv_refit) > args.refit_tol:
-            print(f"  [WARN] LiMe fit differs from catalogue z_sys by "
-                  f"{dv_refit:+.1f} km/s. The source may have been refitted "
-                  f"with manual overrides. The systemic dashed line stays at "
-                  f"the catalogue z_sys.")
-            warned.append(sid)
-
-        lam_lya_sys = LYA_REST * (1.0 + z_sys)
-        lam_line_sys = sysl["rest"] * (1.0 + z_sys)
-        delta_v = float(drow["delta_v_kms"])
-
-        # Display binning. MUSE matched to NIRSpec pixel width in km/s.
-        v_pix_nir = pixel_kms(sysl["wave"], lam_line_sys) * max(args.nirspec_bin, 1)
-        v_pix_muse = pixel_kms(lya["wave"], lam_lya_sys)
-        mbin = (args.muse_bin if args.muse_bin is not None
-                else max(1, int(round(v_pix_nir / v_pix_muse))))
-        lya["wave_d"], lya["flux_d"], lya["err_d"] = rebin(
-            lya["wave"], lya["flux"], lya["err"], mbin)
-        sysl["wave_d"], sysl["flux_d"], sysl["err_d"] = rebin(
-            sysl["wave"], sysl["flux"], sysl["err"], args.nirspec_bin)
-        print(f"  pixel widths: NIRSpec {v_pix_nir:.0f} km/s, MUSE "
-              f"{v_pix_muse:.0f} km/s, MUSE rebin x{mbin}, Lya MC {lya['n_mc']}/{args.n_mc}")
-
-        src = dict(
-            ID=sid, z_sys=z_sys, line=line, tex=LINE_TEX[line],
-            grating=g_full, lya_snr=float(prow["lya_snr"]),
-            z_sys_snr=float(drow["z_sys_snr"]), delta_v=delta_v,
-            delta_v_err=float(drow["delta_v_err_kms"]),
-            lam_lya_sys=lam_lya_sys, lam_line_sys=lam_line_sys,
-            lam_lya_peak=wave_from_v(delta_v, lam_lya_sys),
-        )
-
-        outdir = os.path.join(paths["outroot"], str(sid))
-        os.makedirs(outdir, exist_ok=True)
-        p1 = os.path.join(outdir, f"{sid}_lya_systemic_panels.png")
-        p2 = os.path.join(outdir, f"{sid}_lya_systemic_overlay.png")
-        figure_panels(src, lya, sysl, p1, args.lya_vrange, args.sys_vrange,
-                      args.dpi, args.doublet_pad)
-        figure_overlay(src, lya, sysl, p2, args.overlay_vrange,
-                       not args.no_overlay_fits, args.dpi)
-        print(f"  saved  {p1}")
-        print(f"  saved  {p2}")
-        written.append(sid)
-
-    print("")
-    print("=" * 60)
-    print(f"sources requested   {len(ids)}")
-    print(f"figures written     {len(written)}  (2 per source)")
-    print(f"skipped             {len(skipped)}  {skipped if skipped else ''}")
-    print(f"refit warnings      {len(warned)}  {warned if warned else ''}")
-    print(f"output root         {paths['outroot']}")
-    print("=" * 60)
+    if not a.no_pdf:
+        make_pdfs(cat, flag, a)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ All data paths are under `/ceph/cephfs/apatrick/P2`. Each script prints the full
 
 ## Rebuild in progress (October 2026)
 
-The pipeline is being rewritten step by step to start from Isaac's PRIMER + MINERVA catalogue. Every source is now keyed on Isaac's catalogue `Number` (the `ID` column), not the JELS ID. Sections A and B below are rewritten. Section C onwards still describes the old JELS-ID version and will be updated as each step is redone.
+The pipeline is being rewritten step by step to start from Isaac's PRIMER + MINERVA catalogue. Every source is now keyed on Isaac's catalogue `Number` (the `ID` column), not the JELS ID. Sections A to D below are rewritten (sample, z_sys, MUSE Lyα, detection thresholds, the Lyα catalogue and the Lyα against systemic figures), as are steps 22, 23 (M_UV and β) and 26 (science plots). Steps 18 to 21, 21b, 24, 27 and 28 still describe the old JELS-ID version and will be updated as each is redone. Step 25 has moved to 17d.
 
 ## Systemic redshift rule
 
@@ -163,6 +163,24 @@ python make_lya_fit_pdfs.py
 python make_lya_fit_pdfs.py --levels 99.5 98 95 90
 ```
 
+**17c. Lyα catalogue** `build_lya_catalog.py`
+One row per z_sys source with ID, z_sys, z_sys_err, z_sys_grating, z_lya, z_lya_err, lya_snr, delta_v, delta_v_err, the flags det_99_5, det_98, det_95 (1 above the pooled percentile, 0 below, blank if not tested), lya_status, close_pair_group and the photometric UV columns muv_fit, muv_fit_err, beta_fit, beta_fit_err, beta_fit_good, f1500_fit and f1500_fit_err (from step 22, blank where that fit failed, and all blank with a note if `jwst_catalogs/muv_beta_fits.csv` doesn't exist yet). `close_pair_group` is 0 for a source with its own NIRSpec spectrum, and otherwise the number of the group of Isaac objects sharing one spectrum (1 to 9 at present). The groups come from `jwst_catalogs/primer_minerva_close_pairs.csv` with the same function and numbering as `check_close_pairs.py`, so group n is `plots/close_pairs/group_<n>_<IDs>.png`. It prints the members of each group and warns if the `close_pair` column of the z_sys CSV disagrees. Later scripts read this instead of joining the pipeline CSVs. Writes `MUSE_catalogs/lya_catalog.csv`, which needs `check_close_pairs.py` in the same folder (it imports its grouping).
+```bash
+python build_lya_catalog.py
+python build_lya_catalog.py --levels 99.5 98 95 90   # adds det_90
+```
+Rerun it after step 22 so the UV columns are filled.
+
+**17d. Lyα against the systemic line** `plot_lya_vs_systemic.py` (env312, the [OIII] or Hα fit is repeated with LiMe)
+Two figures per source in `MUSE_subcubes/<ID>/`, `<ID>_lya_systemic_panels.png` and `<ID>_lya_systemic_overlay.png`, then four PDFs in `plots/lya_systemic_pdfs/`, `lya_systemic_<panels|overlay>_<flag>_<detections|non_detections>.pdf`. `--detection` picks the flag (default det_98). The figures do not depend on it, so `--pdf-only` remakes the PDFs for another flag without refitting.
+```bash
+conda activate env312
+python plot_lya_vs_systemic.py --ids 23070 50803        # test
+python plot_lya_vs_systemic.py                          # all, det_98 PDFs
+python plot_lya_vs_systemic.py --pdf-only --detection det_99_5
+sbatch slurm/run_plot_lya_vs_systemic.slurm
+```
+
 ### E. Velocity offsets and grouping
 
 **18. Δv** `find_delta_v_from_best_zsys_line.py`
@@ -193,23 +211,19 @@ python group_by_manual.py
 
 ### F. Galaxy properties
 
-**21b. Match to PRIMER + MINERVA** `match_primer_minerva.py`
-Matches every JELS source to Isaac's COSMOS catalogue (`jwst_catalogs/cosmos_primer_minerva_production.fits`) by position, within 0.3 arcsec. Writes `jwst_catalogs/primer_minerva_by_JELS_ID.csv`, one row per JELS ID. Each row has the match, the catalogue flag and total correction, the photo-z and LePhare mass, and for each of the 19 bands the aperture flux (`<band>_ap`) and the total flux (`<band>_tot`, aperture × total_correction), all in µJy. Steps 22 to 24 and 28 read it. Only rerun when the catalogue or the source list changes.
+**21b. Match to PRIMER + MINERVA** `match_primer_minerva.py` (old, JELS IDs)
+No longer needed for steps 22 and 23, which read Isaac's catalogue by `Number` directly. Steps 24 and 28 still read its output `jwst_catalogs/primer_minerva_by_JELS_ID.csv` until they are rewritten.
+
+**22. M_UV and β** `fit_muv_beta.py` (rewritten for Isaac IDs)
+Power-law fit f_λ ∝ λ^β to the rest-frame UV photometry, as Paper 1 Sect. 2.4 (after Pirie et al. 2025), at z_sys for every source in `primer_minerva_in_muse_zsys.csv`. The photometry is read from `cosmos_primer_minerva_production.fits` by `Number`, with −99 (band not imaged) treated as missing. Total fluxes by default (aperture × `total_correction`, `--phot aperture` for the aperture fluxes), Isaac's errors as they are. A band is used if its blue half-power edge is redward of 1250 Å rest and its pivot is at or below 3000 Å rest, and at least two bands are needed. Below z ≈ 3.5 only F814W, F090W and F115W qualify, so β is poorly constrained there. Errors are inflated by √χ²_ν when χ²_ν > 1. No dust correction. `beta_fit_good` is 1 where σ_β < 0.5 (Paper 1). Isaac's Flag is carried, and `phot_flag` is 1 where it contains 1, 2 or 3. Writes `jwst_catalogs/muv_beta_fits.csv` (muv_fit, beta_fit, their errors, f1500_fit in nJy, the bands used, χ², fit_flag and every band's flux) and `MUSE_subcubes/<ID>/<ID>_muv_beta_fit.png`. `--ids` replaces only those rows.
 ```bash
-python match_primer_minerva.py
+python fit_muv_beta.py --dry-run
+python fit_muv_beta.py
+python fit_muv_beta.py --ids <ID>
 ```
 
-**22. M_UV and β** `fit_muv_beta.py`
-Uses the PRIMER + MINERVA total fluxes by default (`--aper aperture` for the aperture fluxes), including the MINERVA medium bands.
-Writes `jwst_catalogs/muv_beta_by_JELS_ID.csv` and `jwst_spectra/MUV_fits/<ID>/<ID>_muv_beta_fit.png`.
-```bash
-python fit_muv_beta.py --all
-# one source, look only (a non-dry --id run writes a one-row CSV)
-python fit_muv_beta.py --id <ID> --dry-run
-```
-
-**23. M_UV and β checks** `muv_beta_diagnostics.py`
-Writes `jwst_catalogs/muv_beta_diagnostics.csv` and `plots/muv_beta_diagnostics.png`.
+**23. M_UV and β checks** `muv_beta_diagnostics.py` (rewritten)
+Three panels in `plots/muv_beta_diagnostics.png`: β against z_sys (coloured by the number of bands, open where σ_β ≥ 0.5), muv_fit against a single-band M_UV from the band nearest rest 1500 Å (coloured by that band's rest wavelength, since the two differ by about −2.5(β+2)log₁₀(λ/1500)), and σ_β against the number of bands. Prints the median σ_β per number of bands and any source where the two M_UV differ by more than 0.5 mag. Writes `jwst_catalogs/muv_beta_diagnostics.csv`.
 ```bash
 python muv_beta_diagnostics.py
 ```
@@ -226,17 +240,22 @@ python build_ha_flux_corrections.py --slit-mode dja    # DJA path loss only, no 
 
 ### G. Figures
 
-**25. Lyα against the systemic line, per source** `plot_lya_vs_systemic.py`
-Writes `plots/<ID>/`.
+**25. Lyα against the systemic line, per source**
+Moved to step 17d.
+
+**26. Science plots** `plot_lya_science.py` (rewritten for Isaac IDs)
+The same plots as before (histograms of FWHM, Δv, z and M_UV, Δv against FWHM with Verhamme+18, the FWHM model comparison with Prieto-Lyon+25, Mason+18 and Mason+19, Δv and FWHM against M_UV, each also split by redshift and M_UV), now made for the detections and the non-detections of the chosen flag instead of the a/b/c/d groups. `--detection` picks the flag (default det_98, also det_95, det_99_5 or just 95), and it must be a column of `lya_catalog.csv`. Untested sources (65863) are in neither set. Close pairs are left out by default (`--close-pairs include` keeps them). M_UV is muv_fit where muv_fit_err < 0.5. Reads `MUSE_catalogs/lya_catalog.csv` and `lya_fits_mc.csv` (for the FWHM). Writes `plots/lya_science/<flag>_<detections|non_detections>_<plot>.png`, e.g. `det_98_detections_dv_vs_fwhm.png`, 25 per set. `--fwhm-kind obs` adds an `obs_` tag.
 ```bash
-python plot_lya_vs_systemic.py --group a
-python plot_lya_vs_systemic.py --id <ID>
+python plot_lya_science.py                          # det_98, both sets
+python plot_lya_science.py --detection det_95
+python plot_lya_science.py --detection 99.5 --sets detections
 ```
 
-**26. Science plots** `plot_lya_science.py`
-Writes to `plots/`.
+**26b. Check the Lyα widths** `checks/check_lya_fwhm.py`
+Tests whether the fitted FWHM is a fair measure of the lines, for the detections of one flag (default det_98, close pairs left out). Four panels in `plots/lya_fwhm_checks.png`. (a) The FWHM measured straight from each aperture spectrum (1-pixel Gaussian smoothing, half-maximum crossings) against the convolved model measured on the same pixels with the same code. The direct numbers are larger than `fwhm_obs_kms` because of the smoothing and sampling, so compare them only with the model column next to them. (b) FWHM_int against Σ_Lyα, for noise bias. (c) FWHM_int against the continuum residual in the fit window (pixels where the model is below 5% of its peak), as S/N. (d) FWHM_int against the fraction of MC refits with α at its maximum. Writes `MUSE_catalogs/lya_fwhm_checks.csv`.
 ```bash
-python plot_lya_science.py --label all
+python checks/check_lya_fwhm.py
+python checks/check_lya_fwhm.py --detection det_95 --sample all
 ```
 
 **27. Stacks** `stack_lya_systematic.py`
@@ -266,9 +285,11 @@ When an input changes, these are the steps downstream of it. Steps marked * can 
 | continuum subtraction settings | 9 to 14, 15 to 17 if the good sample is affected, then 18 to 21, 28 |
 | a Lyα fit setting | 13, 14, 18 to 21, 28 |
 | a by-eye label | edit `lya_manual_labels.csv`, then 21, 28 |
-| photometry catalogue | 21b, 22 to 24, 27, 28 |
+| photometry catalogue | 22, 23, 17c, 26, then 24, 27, 28 |
 | Hα method | 24, 27, 28 |
 | SED or fesc outputs | 28 |
+| the close-pair list (step 1) | 17c, then anything that reads `lya_catalog.csv` |
+| M_UV or β (22) | 23, 17c, 26 |
 
 Step 7 lists the sources whose z_sys changed. The master also carries `zsys_mismatch_kms`, the difference between the z the MUSE products were made with and the current one.
 
