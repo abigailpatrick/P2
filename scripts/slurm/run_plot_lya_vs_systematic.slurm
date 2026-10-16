@@ -14,5 +14,5 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 echo "plot_lya_vs_systemic (job ${SLURM_JOB_ID}) on ${SLURMD_NODENAME} started $(date)"
-python -u plot_lya_vs_systemic.py --detection det_95
+python -u plot_lya_vs_systemic.py
 echo "Finished at: $(date)"

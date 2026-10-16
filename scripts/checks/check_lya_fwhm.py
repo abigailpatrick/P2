@@ -4,7 +4,7 @@ check_lya_fwhm.py
 
 Is the Lya FWHM from fit_lya_properties_grating.py a fair measure of the
 lines, or does the fit make them wider than they are? Four checks, one panel
-each, for the detections of one flag (default det_98).
+each, for the detections (lya_det == 1 in lya_catalog.csv, in_analysis == 1).
 
 (a) Direct width against the model width
     The FWHM is measured straight from each aperture spectrum: the spectrum
@@ -26,31 +26,33 @@ each, for the detections of one flag (default det_98).
     flux in the fit window where the convolved model is below --outer-frac
     (5 per cent) of its peak, given as S/N and as a fraction of the line
     peak.
-(d) FWHM against how often the MC refits hit alpha = alpha_max
-    frac_alpha_at_bound near 1 means the skew-normal is at its most skewed
-    (close to a half-Gaussian with a long red tail), where the shape of the
-    model rather than the data may set the red half-maximum point. Points
-    are coloured by the fitted alpha. Sources with frac_sigma_at_bound >
-    0.1 are ringed.
+(d) FWHM against how often the MC refits put alpha on a bound
+    frac_alpha_at_bound (from mc_lya_errors_grating.py) counts refits with
+    alpha at EITHER bound, 0 (symmetric) or alpha_max (15, close to a
+    half-Gaussian with a long red tail). A value near 0.5 means the refits
+    jump between the two, i.e. the data do not constrain the skewness.
+    Points are coloured by the fitted alpha. Sources with
+    frac_sigma_at_bound > 0.1 are ringed.
 
-Close pairs are left out by default, as in plot_lya_science.py.
+Only sources with in_analysis == 1 are used, as in plot_lya_science.py, so
+the close pairs and interlopers are left out.
 
 Inputs
 ------
-  MUSE_catalogs/lya_catalog.csv               the det_* flags, lya_snr, close_pair_group
+  MUSE_catalogs/lya_catalog.csv               lya_det, lya_snr, in_analysis
   MUSE_catalogs/lya_fits_mc.csv               fit parameters, fwhm_*, frac_*_at_bound
   MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz    wave (air), flux, var
 
 Outputs
 -------
-  plots/lya_fwhm_checks.png
-  MUSE_catalogs/lya_fwhm_checks.csv           one row per source checked
+  plots/lya_fwhm_checks_<rule>.png
+  MUSE_catalogs/lya_fwhm_checks_<rule>.csv    one row per source checked
+<rule> is the detection rule of the catalogue (det_rule, e.g. p95).
 
 Usage (from scripts/checks/, or anywhere, it finds scripts/ itself)
 -----
 python check_lya_fwhm.py
-python check_lya_fwhm.py --detection det_95
-python check_lya_fwhm.py --sample all --close-pairs include
+python check_lya_fwhm.py --sample all
 """
 
 import argparse
@@ -75,16 +77,15 @@ LYA_CATALOG = getattr(pc, "LYA_CATALOG", f"{pc.MUSE_CAT_DIR}/lya_catalog.csv")
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--detection", default="det_98",
-                   help="flag in lya_catalog.csv, e.g. det_98 (default), det_95, 99.5")
     p.add_argument("--sample", choices=["detections", "non_detections", "all"],
                    default="detections")
-    p.add_argument("--close-pairs", choices=["exclude", "include"], default="exclude")
     p.add_argument("--catalog", default=LYA_CATALOG)
     p.add_argument("--fits-csv", default=f"{pc.MUSE_CAT_DIR}/lya_fits_mc.csv")
     p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
-    p.add_argument("--out-png", default=f"{pc.P2_ROOT}/plots/lya_fwhm_checks.png")
-    p.add_argument("--out-csv", default=f"{pc.MUSE_CAT_DIR}/lya_fwhm_checks.csv")
+    p.add_argument("--out-png", default=None,
+                   help="default plots/lya_fwhm_checks_<rule>.png")
+    p.add_argument("--out-csv", default=None,
+                   help="default MUSE_catalogs/lya_fwhm_checks_<rule>.csv")
     p.add_argument("--fit-window", type=float, default=25.0,
                    help="AA either side of best_center, as the fit (default 25)")
     p.add_argument("--smooth-pix", type=float, default=1.0,
@@ -97,13 +98,6 @@ def parse_args():
     p.add_argument("--n-mc", type=int, default=200)
     p.add_argument("--seed", type=int, default=1)
     return p.parse_args()
-
-
-def normalise_flag(flag):
-    f = str(flag).strip().lower()
-    if f.startswith("det_"):
-        return f
-    return "det_" + f"{float(f):g}".replace(".", "_")
 
 
 def half_max_width(wave, prof, peak_guess, search):
@@ -206,21 +200,23 @@ def corr_text(x, y):
 
 def main():
     a = parse_args()
-    flag = normalise_flag(a.detection)
+    flag = "lya_det"
     print("check_lya_fwhm.py")
+    rule = pc.det_rule(pd.read_csv(a.catalog))
+    a.out_png = a.out_png or f"{pc.P2_ROOT}/plots/lya_fwhm_checks_{rule}.png"
+    a.out_csv = a.out_csv or f"{pc.MUSE_CAT_DIR}/lya_fwhm_checks_{rule}.csv"
     for p_ in (a.catalog, a.fits_csv):
         print(f"  reading  {os.path.abspath(p_)}")
     print(f"  reading  {os.path.abspath(a.subcube_dir)}/<ID>/<ID>_lya_spectrum.npz")
     print(f"  writing  {os.path.abspath(a.out_png)}")
     print(f"  writing  {os.path.abspath(a.out_csv)}")
-    print(f"  {flag}, sample {a.sample}, close pairs {a.close_pairs}, smoothing "
+    print(f"  sample {a.sample}, in_analysis == 1, smoothing "
           f"{a.smooth_pix:g} pix, outer pixels below {a.outer_frac:g} of the model peak\n")
 
     cat = pd.read_csv(a.catalog)
     cat["ID"] = cat["ID"].astype(int)
-    if flag not in cat.columns:
-        raise SystemExit(f"{a.catalog} has no {flag}. Rerun build_lya_catalog.py with "
-                         f"--levels including {flag[4:].replace('_', '.')}")
+    if flag not in cat.columns or "in_analysis" not in cat.columns:
+        raise SystemExit(f"{a.catalog} has no lya_det or in_analysis. Rerun build_lya_catalog.py")
     fits = pd.read_csv(a.fits_csv)
     fits["ID"] = fits["ID"].astype(int)
     need = ["ID", "best_center", "flux_fit", "mu", "sigma", "alpha_skew", "sigma_lsf_ang",
@@ -232,8 +228,7 @@ def main():
     extra = [c for c in ("fwhm_int_kms_err_mc", "frac_alpha_at_bound",
                          "frac_sigma_at_bound", "skew_at_max") if c in fits.columns]
 
-    df = cat[["ID", "z_sys", "lya_snr", flag] +
-             [c for c in ("close_pair_group",) if c in cat.columns]].merge(
+    df = cat[["ID", "z_sys", "lya_snr", flag, "in_analysis", "pair_status"]].merge(
         fits[need + extra], on="ID", how="left")
     df = df[df["fit_success"].astype(str).str.lower().isin(["true", "1"])]
     if a.sample == "detections":
@@ -242,11 +237,10 @@ def main():
         df = df[df[flag] == 0]
     else:
         df = df[df[flag].notna()]
-    if a.close_pairs == "exclude" and "close_pair_group" in df.columns:
-        cp = df.loc[df["close_pair_group"] > 0, "ID"].tolist()
-        if cp:
-            print(f"  close pairs left out: {cp}")
-        df = df[df["close_pair_group"] == 0]
+    cp = df.loc[df["in_analysis"] == 0, "ID"].tolist()
+    if cp:
+        print(f"  close pairs and interlopers left out: {cp}")
+    df = df[df["in_analysis"] == 1]
     df = df.sort_values("ID").reset_index(drop=True)
     print(f"  {len(df)} sources\n")
 
@@ -258,7 +252,7 @@ def main():
             df[c] = np.nan
 
     print(f"  {'ID':>6} {'S/N':>5} {'int':>5} {'obs':>5} {'direct':>6} {'model':>6} "
-          f"{'d/m':>5} {'resid S/N':>9} {'resid/peak':>10} {'alpha':>5} {'a@max':>5}")
+          f"{'d/m':>5} {'resid S/N':>9} {'resid/peak':>10} {'alpha':>5} {'a@bnd':>5}")
     for _, r in df.iterrows():
         print(f"  {r['ID']:>6d} {r['lya_snr']:5.1f} {r['fwhm_int_kms']:5.0f} "
               f"{r['fwhm_obs_kms']:5.0f} {r['fwhm_direct_kms']:6.0f} "
@@ -285,8 +279,8 @@ def main():
     print(f"  (c) FWHM_int vs residual   {plain(t_c)}")
     print(f"      residual S/N > 2: {int((df['cont_resid_snr'] > 2).sum())}, "
           f"< -2: {int((df['cont_resid_snr'] < -2).sum())}")
-    print(f"  (d) FWHM_int vs alpha@max  {plain(t_d)}")
-    print(f"      alpha at the bound in >50% of refits: "
+    print(f"  (d) FWHM_int vs alpha@bound {plain(t_d)}")
+    print(f"      alpha at a bound (0 or max) in >50% of refits: "
           f"{int((df['frac_alpha_at_bound'] > 0.5).sum())}")
     bad = df.loc[~ok, ["ID", "direct_flag"]].values.tolist()
     if bad:
@@ -349,14 +343,14 @@ def main():
         D.legend(frameon=False, loc="lower right", fontsize=8)
     fig.colorbar(sc, ax=D, pad=0.02).set_label(r"fitted $\alpha$")
     D.set_xlim(-0.05, 1.05)
-    D.set_xlabel(r"fraction of MC refits with $\alpha$ at its maximum")
+    D.set_xlabel(r"fraction of MC refits with $\alpha$ at a bound (0 or 15)")
     D.set_ylabel(r"FWHM$_{\rm int}$ [km/s]")
-    D.set_title("(d) width against skewness at the bound", fontsize=10)
+    D.set_title("(d) width against skewness at a bound", fontsize=10)
     D.text(0.96, 0.96, t_d, transform=D.transAxes, va="top", ha="right",
            fontsize=8, bbox=dict(fc="white", ec="none", alpha=0.8))
 
     lab = {"detections": "detections", "non_detections": "non-detections", "all": "all tested"}
-    fig.suptitle(f"Lya FWHM checks, {flag} {lab[a.sample]}, N = {len(df)}", fontsize=11)
+    fig.suptitle(f"Lya FWHM checks, {rule} {lab[a.sample]}, N = {len(df)}", fontsize=11)
     fig.tight_layout()
     png = os.path.abspath(a.out_png)
     os.makedirs(os.path.dirname(png), exist_ok=True)

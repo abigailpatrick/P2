@@ -65,9 +65,30 @@ MUSE_FILES = {
     "false_snr": "false_optimal_snr.csv",       # optimize_lya_positions_f_grating.py
     "systemic_panels_png": "lya_systemic_panels.png",    # plot_lya_vs_systemic.py
     "systemic_overlay_png": "lya_systemic_overlay.png",
+    "double_fit_png": "lya_double_fit.png",      # fit_lya_double_peak.py
 }
 
 LYA_CATALOG = f"{MUSE_CAT_DIR}/lya_catalog.csv"   # build_lya_catalog.py
+LYA_DETECTION_CUTS = f"{MUSE_CAT_DIR}/lya_detection_cuts.csv"   # build_lya_catalog.py
+
+# ----------------------------------------------------------------------
+# Lya detection rule (build_lya_catalog.py). By default a source is a
+# detection if lya_snr (Sigma_Lya, the 10 AA sliding-window S/N) >= LYA_DET_SNR.
+# Instead the threshold can be a percentile of the pooled false-position S/N
+# (--det-percentile 90, 95, 98 or 99.5). Optionally also a fixed limit on the
+# Delta_v error or on the Lya line-centre error (--extra-cut). The rule used
+# is stored in the catalogue as det_rule, e.g. snr5, p95, snr5_dverr100 or
+# p98_cenerr60, and every PDF and plot made from the catalogue carries that
+# tag in its name. Every other tested source is a non-detection and stays in
+# the catalogue.
+LYA_DET_SNR = 5.0
+
+# Close pairs. In the groups of Isaac objects sharing one NIRSpec spectrum,
+# these IDs own the spectrum and the other member is a lower-redshift
+# interloper (groups 4 and 5 of check_close_pairs.py). They stay in the
+# analysis and the interlopers are dropped. Every member of the other groups
+# is left out of the analysis and shown in its own close-pairs PDFs.
+CLOSE_PAIR_KEEP = (50803, 51988)
 
 FALSE_POS_SOURCES = f"{MUSE_CAT_DIR}/lya_false_pos_sources.csv"   # manifest
 
@@ -315,3 +336,51 @@ def closer_to_target(ra_c, dec_c, ra0, dec0, nb_ra, nb_dec):
     d_t = np.hypot((ra_c - ra0) * cosd, dec_c - dec0)
     d_n = np.hypot((np.asarray(nb_ra) - ra_c) * cosd, np.asarray(nb_dec) - dec_c)
     return bool(d_t <= d_n.min())
+
+
+def lya_pdf_groups(cat):
+    """Split lya_catalog.csv rows into the sets shown in the PDFs.
+
+    Returns ({"detections", "non_detections", "close_pairs"}: rows sorted by
+    lya_snr, highest first), the untested IDs (lya_status not ok) and the
+    interloper IDs, which appear nowhere.
+    """
+    for c in ("lya_det", "pair_status", "in_analysis"):
+        if c not in cat.columns:
+            raise SystemExit(f"lya_catalog.csv has no {c} column. Rerun build_lya_catalog.py")
+    tested = cat[cat["lya_status"] == "ok"].sort_values("lya_snr", ascending=False)
+    ana = tested[tested["in_analysis"] == 1]
+    groups = {
+        "detections": ana[ana["lya_det"] == 1],
+        "non_detections": ana[ana["lya_det"] == 0],
+        "close_pairs": tested[tested["pair_status"] == "close_pair"],
+    }
+    untested = cat.loc[cat["lya_status"] != "ok", "ID"].astype(int).tolist()
+    interlopers = cat.loc[cat["pair_status"] == "interloper", "ID"].astype(int).tolist()
+    return groups, untested, interlopers
+
+
+def det_rule(cat):
+    """The detection-rule tag stored in lya_catalog.csv, e.g. 'p95'."""
+    if "det_rule" not in cat.columns or cat["det_rule"].dropna().empty:
+        raise SystemExit("lya_catalog.csv has no det_rule column. Rerun build_lya_catalog.py")
+    tags = cat["det_rule"].dropna().unique()
+    if len(tags) > 1:
+        raise SystemExit(f"lya_catalog.csv mixes detection rules {list(tags)}")
+    return str(tags[0])
+
+
+def detection_cuts_path(tag, cat_dir=MUSE_CAT_DIR):
+    """The one-row description of a rule written by build_lya_catalog.py,
+    kept next to the catalogue."""
+    return f"{cat_dir}/lya_detection_cuts_{tag}.csv"
+
+
+def det_label(r):
+    """Short text for a source's detection state, for PDF captions."""
+    if r.get("lya_status") != "ok":
+        return "not tested"
+    if r.get("lya_det") == 1:
+        return "detection"
+    reason = r.get("det_reason")
+    return f"non-detection ({reason})" if isinstance(reason, str) and reason else "non-detection"

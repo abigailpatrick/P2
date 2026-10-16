@@ -2,37 +2,53 @@
 """
 make_lya_fit_pdfs.py
 
-Contact sheets of the Lya fits for checking by eye what the detections and
-non-detections look like at each false-positive threshold.
+Contact sheets of the Lya fits for checking the detections and
+non-detections by eye. By default (--figure best) each source shows the fit
+the catalogue prefers (lya_model): the skewed-Gaussian figure
+<ID>_lya_fit.png for single, or the double-peak figure
+<ID>_lya_double_fit.png for double. --figure single or double shows that
+figure for every source instead.
 
-For each threshold (default the pooled 99.5th, 98th and 95th percentiles from
-false_pos_percentiles.py) two PDFs are written, one of the sources whose
-lya_snr is above it and one of those below. Each page holds four of the
-<ID>_lya_fit.png figures (spectrum with the fit and detection window,
-pseudo-NB), sorted by lya_snr from highest to lowest, with a caption giving
-the S/N, z_sys, Delta_v and the fit's quality flag. The first page lists the
-threshold and every source in the PDF.
+The sets follow lya_catalog.csv (build_lya_catalog.py), so they follow
+whichever detection rule the catalogue was built with. The rule tag (det_rule,
+e.g. p95 or p90_dverr100) goes into every PDF name.
+  detections       in_analysis == 1 and lya_det == 1
+  non_detections   in_analysis == 1 and lya_det == 0
+  close_pairs      pair_status == close_pair, detected or not
+Interlopers (the lower-redshift member of close-pair groups 4 and 5) are in
+no PDF. Sources not tested (lya_status not ok, e.g. 65863) are in no PDF and
+are listed on the first page of each.
 
-Sources without band coverage (status not "ok" in lya_detections.csv, e.g.
-65863 in the AO gap) are in neither PDF and are listed on the summary pages.
+Each page holds four figures sorted by lya_snr from highest to lowest, each
+captioned with the S/N, z_sys, the preferred model with its Delta_BIC,
+Delta_v and its error (from the preferred fit, so the red peak for a double),
+the blue peak for a double, the detection state (and the reason for a
+non-detection) and any fit quality flag. Close-pair
+captions also give the group number. The first page lists the detection
+rule and every source in the PDF.
 
 Inputs
 ------
-  MUSE_catalogs/lya_detections.csv              status, lya_snr, det_<p> flags
-  MUSE_catalogs/lya_false_pos_thresholds.csv    threshold values
-  MUSE_catalogs/lya_fits.csv                    z_sys, delta_v_kms, quality_reason
+  MUSE_catalogs/lya_catalog.csv                 lya_det, det_reason, det_rule, ...
+  MUSE_catalogs/lya_detection_cuts_<tag>.csv    the rule, quoted on the first page
+  MUSE_catalogs/lya_fits.csv               quality_reason
   MUSE_subcubes/<ID>/<ID>_lya_fit.png
+  MUSE_subcubes/<ID>/<ID>_lya_double_fit.png    for double sources, or --figure double
 
 Outputs, in plots/lya_fit_pdfs/
 -------
-  lya_fits_above_99_5.pdf   lya_fits_below_99_5.pdf
-  lya_fits_above_98.pdf     lya_fits_below_98.pdf
-  lya_fits_above_95.pdf     lya_fits_below_95.pdf
+  lya_fits_<tag>_detections.pdf
+  lya_fits_<tag>_non_detections.pdf
+  lya_fits_<tag>_close_pairs.pdf
+--figure single and --figure double write the same three as
+lya_single_fits_<tag>_<set>.pdf and lya_double_fits_<tag>_<set>.pdf.
 
 Usage
 -----
-python make_lya_fit_pdfs.py
-python make_lya_fit_pdfs.py --levels 99.5 98 95 90
+python make_lya_fit_pdfs.py                                        # preferred fit per source
+python make_lya_fit_pdfs.py --figure double                        # every source's double fit
+python make_lya_fit_pdfs.py --figure single                        # every source's skewed Gaussian
+python make_lya_fit_pdfs.py --catalog MUSE_catalogs/lya_catalog_p90.csv
 """
 
 import argparse
@@ -50,24 +66,27 @@ import p2_common as pc
 CAT = pc.MUSE_CAT_DIR
 PER_PAGE = 4
 A4 = (8.27, 11.69)
+TITLES = {"detections": "Lya fits, detections ({})",
+          "non_detections": "Lya fits, non-detections ({})",
+          "close_pairs": "Lya fits, close pairs, not in the analysis ({})"}
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--detections", default=f"{CAT}/lya_detections.csv")
-    p.add_argument("--thresholds", default=f"{CAT}/lya_false_pos_thresholds.csv")
+    p.add_argument("--catalog", default=pc.LYA_CATALOG)
+    p.add_argument("--cuts", default=None,
+                   help="default lya_detection_cuts_<tag>.csv next to the catalogue")
     p.add_argument("--fits-csv", default=f"{CAT}/lya_fits.csv")
     p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
     p.add_argument("--outdir", default=f"{pc.P2_ROOT}/plots/lya_fit_pdfs")
-    p.add_argument("--levels", type=float, nargs="+", default=[99.5, 98, 95])
+    p.add_argument("--figure", choices=["best", "single", "double"], default="best",
+                   help="best (default): the preferred fit of each source (lya_model). "
+                        "single: every source's skewed-Gaussian figure (<ID>_lya_fit.png). "
+                        "double: every source's double-peak figure (<ID>_lya_double_fit.png)")
     p.add_argument("--width-px", type=int, default=2000,
                    help="figures are shrunk to this width to keep the PDFs small")
     return p.parse_args()
-
-
-def pname(p_):
-    return f"{p_:g}".replace(".", "_")
 
 
 def load_png(path, width):
@@ -78,53 +97,113 @@ def load_png(path, width):
     return np.asarray(im)
 
 
-def caption(r):
-    parts = [f"ID {int(r['ID'])}", rf"$\Sigma$ = {r['lya_snr']:.2f}"]
+def rule_text(cuts_path, tex=True):
+    """One line describing the detection rule, from lya_detection_cuts_<tag>.csv.
+    tex=False gives plain text for the terminal."""
+    if not os.path.exists(cuts_path):
+        return f"Detection rule: see {cuts_path}"
+    c = pd.read_csv(cuts_path).iloc[0]
+    thr = float(c["snr_threshold"])
+    extra = str(c.get("extra_cut", "none"))
+    fixed = str(c.get("det_mode", "percentile")) == "snr"
+    pct = c.get("snr_threshold_percentile", np.nan)
+    if fixed:
+        p_txt = f" ({float(pct):.2f}th percentile)" if pd.notna(pct) else ""
+    else:
+        p_ = float(c["det_percentile"])
+    if tex:
+        txt = (rf"Detection ({c['det_rule']}): $\Sigma \geq {thr:g}${p_txt}" if fixed else
+               rf"Detection ({c['det_rule']}): $\Sigma > \Sigma^{{{p_:g}}} = {thr:.2f}$")
+        if extra == "dv_err":
+            txt += rf" and $\sigma_{{\Delta v}} \leq {float(c['dv_err_max']):g}$ km/s"
+        elif extra == "centre_err":
+            txt += rf" and Ly$\alpha$ centre error $\leq {float(c['centre_err_max']):g}$ km/s"
+        return txt
+    txt = (f"Detection ({c['det_rule']}): S/N >= {thr:g}{p_txt}" if fixed else
+           f"Detection ({c['det_rule']}): S/N > {thr:.2f} ({p_:g}th percentile)")
+    if extra == "dv_err":
+        txt += f" and Delta_v error <= {float(c['dv_err_max']):g} km/s"
+    elif extra == "centre_err":
+        txt += f" and Lya centre error <= {float(c['centre_err_max']):g} km/s"
+    return txt
+
+
+def cuts_for(cat, catalog_path, given=None):
+    """(tag, path of the matching lya_detection_cuts_<tag>.csv)."""
+    tag = pc.det_rule(cat)
+    path = given or pc.detection_cuts_path(tag, os.path.dirname(os.path.abspath(catalog_path)))
+    return tag, path
+
+
+def caption(r, with_group=False):
+    parts = [f"ID {int(r['ID'])}"]
+    if with_group:
+        parts.append(f"group {int(r['close_pair_group'])}")
+    parts.append(rf"$\Sigma$ = {r['lya_snr']:.2f}")
     if pd.notna(r.get("z_sys")):
         parts.append(f"z_sys = {r['z_sys']:.4f}")
-    if pd.notna(r.get("delta_v_kms")):
-        parts.append(rf"$\Delta v$ = {r['delta_v_kms']:.0f} km/s")
+    model = r.get("lya_model")
+    if isinstance(model, str) and model:
+        b = (rf" $\Delta$BIC {r['dbic_double']:.1f}" if pd.notna(r.get("dbic_double")) else "")
+        parts.append(f"{model}{b}")
+    if pd.notna(r.get("delta_v")):
+        e = (f" $\\pm$ {r['delta_v_err']:.0f}" if pd.notna(r.get("delta_v_err")) else "")
+        if pd.notna(r.get("lya_centre_err")):
+            e += f" (centre $\\pm$ {r['lya_centre_err']:.0f})"
+        lab = r"$\Delta v_{\rm red}$" if model == "double" else r"$\Delta v$"
+        parts.append(rf"{lab} = {r['delta_v']:.0f}{e} km/s")
+    if model == "double" and pd.notna(r.get("dv_blue")):
+        parts.append(rf"blue {r['dv_blue']:.0f} km/s, B/R {r['blue_red_ratio']:.2f}")
+    parts.append(pc.det_label(r))
     if isinstance(r.get("quality_reason"), str) and r["quality_reason"] != "ok":
-        parts.append(f"flag: {r['quality_reason']}")
+        parts.append(f"fit flag: {r['quality_reason']}")
     return "    ".join(parts)
 
 
-def summary_page(pdf, title, thr, rows, unusable):
+def summary_page(pdf, title, rule, rows, untested, with_reason):
     fig = plt.figure(figsize=A4)
     fig.text(0.08, 0.95, title, fontsize=14, weight="bold", va="top")
-    fig.text(0.08, 0.92, rf"threshold $\Sigma$ = {thr:.2f}, {len(rows)} sources, "
-             "sorted by S/N", fontsize=10, va="top")
-    lines = [f"{int(r['ID']):>6d}   {r['lya_snr']:6.2f}" for _, r in rows.iterrows()]
+    fig.text(0.08, 0.92, rule, fontsize=9, va="top")
+    fig.text(0.08, 0.895, f"{len(rows)} sources, sorted by S/N", fontsize=9, va="top")
+    lines = []
+    for _, r in rows.iterrows():
+        extra = f"  {r['det_reason']}" if with_reason and r.get("det_reason") else ""
+        lines.append(f"{int(r['ID']):>6d}  {r['lya_snr']:6.2f}{extra}")
     ncol = 3
     per_col = int(np.ceil(len(lines) / ncol)) if lines else 0
     for c in range(ncol):
         chunk = lines[c * per_col:(c + 1) * per_col]
-        fig.text(0.08 + c * 0.3, 0.88, "    ID      S/N\n" + "\n".join(chunk),
-                 family="monospace", fontsize=8, va="top")
-    if unusable:
-        fig.text(0.08, 0.06, "Not in either PDF (no band coverage): "
-                 + ", ".join(map(str, unusable)), fontsize=8)
+        fig.text(0.08 + c * 0.3, 0.86, "    ID     S/N\n" + "\n".join(chunk),
+                 family="monospace", fontsize=7.5, va="top")
+    if untested:
+        fig.text(0.08, 0.06, "Not tested for Lya, in no PDF: " + ", ".join(map(str, untested)),
+                 fontsize=8)
     pdf.savefig(fig)
     plt.close(fig)
 
 
-def write_pdf(path, title, thr, rows, unusable, args):
+def write_pdf(path, title, rule, rows, untested, args, with_group, with_reason):
     missing = []
     with PdfPages(path) as pdf:
-        summary_page(pdf, title, thr, rows, unusable)
+        summary_page(pdf, title, rule, rows, untested, with_reason)
         for start in range(0, len(rows), PER_PAGE):
+            chunk = rows.iloc[start:start + PER_PAGE]
             fig, axes = plt.subplots(PER_PAGE, 1, figsize=A4)
-            for ax, (_, r) in zip(axes, rows.iloc[start:start + PER_PAGE].iterrows()):
-                png = pc.muse_path(int(r["ID"]), "fit_png", args.subcube_dir)
+            for ax, (_, r) in zip(axes, chunk.iterrows()):
+                if args.figure == "best":
+                    key = "double_fit_png" if r.get("lya_model") == "double" else "fit_png"
+                else:
+                    key = "fit_png" if args.figure == "single" else "double_fit_png"
+                png = pc.muse_path(int(r["ID"]), key, args.subcube_dir)
                 if os.path.exists(png):
                     ax.imshow(load_png(png, args.width_px))
                 else:
                     missing.append(int(r["ID"]))
                     ax.text(0.5, 0.5, f"no figure at {png}", ha="center", fontsize=7,
                             transform=ax.transAxes)
-                ax.set_title(caption(r), fontsize=8, loc="left")
+                ax.set_title(caption(r, with_group), fontsize=7.5, loc="left")
                 ax.set_axis_off()
-            for ax in axes[len(rows.iloc[start:start + PER_PAGE]):]:
+            for ax in axes[len(chunk):]:
                 ax.set_axis_off()
             fig.tight_layout(h_pad=0.6)
             pdf.savefig(fig, dpi=150)
@@ -135,36 +214,40 @@ def write_pdf(path, title, thr, rows, unusable, args):
 def main():
     a = parse_args()
     print("make_lya_fit_pdfs.py")
-    for path in (a.detections, a.thresholds, a.fits_csv):
-        print(f"Reading  {os.path.abspath(path)}")
-    det = pd.read_csv(a.detections)
-    thr = pd.read_csv(a.thresholds).iloc[0]
-    fits = pd.read_csv(a.fits_csv)[["ID", "z_sys", "delta_v_kms", "quality_reason"]]
-    det = det.merge(fits, on="ID", how="left")
-    ok = det[det["status"] == "ok"].sort_values("lya_snr", ascending=False)
-    unusable = det.loc[det["status"] != "ok", "ID"].astype(int).tolist()
-    os.makedirs(a.outdir, exist_ok=True)
-    print("")
+    cat = pd.read_csv(a.catalog)
+    cat["ID"] = cat["ID"].astype(int)
+    tag, cuts = cuts_for(cat, a.catalog, a.cuts)
+    for path in (a.catalog, cuts, a.fits_csv):
+        print(f"  reading  {os.path.abspath(path)}")
+    if os.path.exists(a.fits_csv) and "quality_reason" in pd.read_csv(a.fits_csv, nrows=0).columns:
+        q = pd.read_csv(a.fits_csv)[["ID", "quality_reason"]]
+        q["ID"] = q["ID"].astype(int)
+        cat = cat.merge(q, on="ID", how="left")
+    cat["det_reason"] = cat["det_reason"].fillna("")
+    groups, untested, interlopers = pc.lya_pdf_groups(cat)
+    rule = rule_text(cuts)
+    outdir = os.path.abspath(a.outdir)
+    os.makedirs(outdir, exist_ok=True)
+    stem = {"best": "lya_fits", "single": "lya_single_fits", "double": "lya_double_fits"}[a.figure]
+    print(f"  writing  {outdir}/{stem}_{tag}_<detections|non_detections|close_pairs>.pdf")
+    print(f"  {rule_text(cuts, tex=False)}\n")
 
-    written = []
-    for lev in a.levels:
-        col = f"p{pname(lev)}"
-        if col not in thr:
-            print(f"  WARNING no {col} in the thresholds file, skipped. Rerun "
-                  f"false_pos_percentiles.py with --percentiles including {lev:g}")
-            continue
-        t = float(thr[col])
-        above = ok[ok["lya_snr"] > t]
-        below = ok[ok["lya_snr"] <= t]
-        for rows, side in ((above, "above"), (below, "below")):
-            path = os.path.join(os.path.abspath(a.outdir), f"lya_fits_{side}_{pname(lev)}.pdf")
-            title = f"Lya fits {side} the {lev:g}th percentile"
-            missing = write_pdf(path, title, t, rows, unusable, a)
-            print(f"  {lev:>5g}th ({t:.2f})  {side:<5}  {len(rows):>3d} sources  {path}")
-            if missing:
-                print(f"         WARNING no fit figure for {missing}")
-            written.append(path)
-    print(f"\n{len(written)} PDFs written to {os.path.abspath(a.outdir)}")
+    for name, rows in groups.items():
+        path = os.path.join(outdir, f"{stem}_{tag}_{name}.pdf")
+        title = TITLES[name].format(tag)
+        if a.figure != "best":
+            title = title.replace("Lya fits", "Lya double-peak fits" if a.figure == "double"
+                                  else "Lya skewed-Gaussian fits")
+        missing = write_pdf(path, title, rule, rows, untested, a,
+                            with_group=name == "close_pairs",
+                            with_reason=name != "detections")
+        print(f"  {name:<15} {len(rows):>3d} sources  {path}")
+        if missing:
+            print(f"                  WARNING no fit figure for {missing}")
+    if interlopers:
+        print(f"\n  interlopers, in no PDF: {interlopers}")
+    if untested:
+        print(f"  not tested, in no PDF:  {untested}")
 
 
 if __name__ == "__main__":

@@ -3,35 +3,44 @@
 plot_lya_science.py
 
 Science plots for the Lya detections and non-detections of the z_sys sample.
-A source is a detection if the chosen flag in lya_catalog.csv is 1 and a
-non-detection if it is 0 (--detection, default det_98, the pooled 98th
-percentile of the false-position S/N). Sources not tested (lya_status not
-ok, e.g. 65863 in the AO gap) are in neither.
+The detection rule is chosen when building the catalogue
+(build_lya_catalog.py), so a source is a detection if lya_det is 1 in
+lya_catalog.csv and a non-detection if it is 0.
+Sources not tested (lya_status not ok, e.g. 65863 in the AO gap) are in
+neither.
 
-Every plot is made once for each set and the flag and set are in the file
-name, e.g. det_98_detections_dv_vs_fwhm.png and
-det_95_non_detections_dv_vs_fwhm.png, so plots for different thresholds sit
-side by side without overwriting each other. For non-detections Delta_v and
-FWHM come from fits to low-S/N spectra, so treat them as a check rather than
-as measurements.
+Only sources with in_analysis == 1 are plotted. That leaves out the close
+pairs (pair_status close_pair, shown in their own PDFs by
+make_lya_fit_pdfs.py and plot_lya_vs_systemic.py) and the two interlopers,
+and keeps 50803 and 51988, which own their spectra.
 
-Close pairs (close_pair_group > 0 in lya_catalog.csv) are left out by default
-until the pair decisions are made. --close-pairs include keeps them.
+Every plot is made once for each set, named <rule>_detections_<plot>.png and
+<rule>_non_detections_<plot>.png, where <rule> is the detection rule the
+catalogue was built with (det_rule, e.g. p95 or p90_dverr100), so plots for
+different rules sit side by side. --catalog points at a kept copy,
+lya_catalog_<rule>.csv, to remake an older rule's plots.
+
+For non-detections Delta_v and FWHM come from fits to low-S/N spectra, or
+to lines whose errors failed the rule's extra cut, so treat them as a check
+rather than as measurements.
 
 Reads
 -----
-  MUSE_catalogs/lya_catalog.csv     ID, z_sys, delta_v, delta_v_err, the
-                                    det_* flags, lya_status, close_pair_group,
-                                    muv_fit, muv_fit_err (build_lya_catalog.py)
-  MUSE_catalogs/lya_fits_mc.csv     fwhm_int_kms, fwhm_obs_kms, their MC
-                                    errors, fwhm_lsf_kms, resolved
+  MUSE_catalogs/lya_catalog.csv     ID, z_sys, delta_v, delta_v_err, lya_det,
+                                    lya_status, in_analysis, fwhm_int_kms,
+                                    fwhm_obs_kms, their errors, fwhm_lsf_kms,
+                                    fwhm_resolved, muv_fit, muv_fit_err
+                                    (build_lya_catalog.py)
+
+Delta_v and FWHM are those of the preferred fit in the catalogue (lya_model),
+the skewed Gaussian for a single line and the red peak for a double.
 
 M_UV is the photometric muv_fit (fit_muv_beta.py). Only values with
 muv_fit_err < --muv-max-err (0.5) are used. Sources without one keep their
 FWHM and Delta_v but drop out of the M_UV plots.
 
-Writes to --outdir, every name prefixed <flag>_<set>_
--------------------------------------------------------
+Writes to --outdir, every name prefixed <rule>_<set>_
+-----------------------------------------------------
 <set> is detections or non_detections. Plots ending _zbins use three redshift
 bins (--z-edges, default 3.5 4.5) and each has a _zbins2 version with two bins
 split at --z-split (default 3.5).
@@ -70,7 +79,7 @@ FWHM and the MUSE line spread function
 FWHM is the intrinsic width, corrected for the MUSE LSF by forward modelling
 in fit_lya_properties_grating.py (--fwhm-kind int, the default).
 --fwhm-kind obs plots the observed, LSF-convolved width instead, and every
-name then gains an obs_ tag (det_98_detections_obs_dv_vs_fwhm.png).
+name then gains an obs_ tag (p95_detections_obs_dv_vs_fwhm.png).
 
 Lines MUSE does not resolve get an intrinsic FWHM upper limit of
 --resolve-frac x FWHM_LSF (default 0.5, matching the fitter). They are drawn
@@ -90,9 +99,8 @@ shared across panels.
 
 Usage
 -----
-python plot_lya_science.py                       # det_98, both sets
-python plot_lya_science.py --detection det_95
-python plot_lya_science.py --detection 99.5 --sets detections
+python plot_lya_science.py                       # both sets
+python plot_lya_science.py --sets detections
 python plot_lya_science.py --fwhm-kind obs
 """
 
@@ -181,16 +189,7 @@ def panel_width(n):
 # Data
 # ---------------------------------------------------------------------------
 
-def normalise_flag(flag):
-    """'98', '98.0', 'det_98' -> 'det_98'; '99.5' -> 'det_99_5'."""
-    f = str(flag).strip().lower()
-    if f.startswith("det_"):
-        return f
-    return "det_" + f"{float(f):g}".replace(".", "_")
-
-
-def load_sample(catalog_csv, fits_csv, flag, fwhm_kind="int", resolve_frac=0.5,
-                muv_max_err=0.5):
+def load_sample(catalog_csv, fwhm_kind="int", resolve_frac=0.5, muv_max_err=0.5):
     """Every tested source with its Lya fit and photometric M_UV.
 
     Adds 'fwhm' and 'fwhm_err' holding the chosen kind (int or obs), a boolean
@@ -200,36 +199,25 @@ def load_sample(catalog_csv, fits_csv, flag, fwhm_kind="int", resolve_frac=0.5,
     """
     cat = pd.read_csv(catalog_csv)
     cat["ID"] = cat["ID"].astype(int)
-    need = ["ID", "z_sys", "delta_v", "delta_v_err", flag, "lya_status"]
+    need = ["ID", "z_sys", "delta_v", "delta_v_err", "lya_det", "lya_status",
+            "in_analysis", "pair_status", f"fwhm_{fwhm_kind}_kms",
+            f"fwhm_{fwhm_kind}_kms_err", "fwhm_lsf_kms", "fwhm_resolved"]
     missing = [c for c in need if c not in cat.columns]
     if missing:
-        raise SystemExit(f"{catalog_csv} has no {missing}. Rerun build_lya_catalog.py"
-                         + (f" with --levels including {flag[4:].replace('_', '.')}"
-                            if flag in missing else ""))
-    for c in ("close_pair_group", "muv_fit", "muv_fit_err"):
+        raise SystemExit(f"{catalog_csv} has no {missing}. Rerun build_lya_catalog.py")
+    for c in ("muv_fit", "muv_fit_err"):
         if c not in cat.columns:
             print(f"  WARNING {c} not in {catalog_csv}, rerun build_lya_catalog.py")
-            cat[c] = 0 if c == "close_pair_group" else np.nan
+            cat[c] = np.nan
     cat = cat.rename(columns={"delta_v": "delta_v_kms",
                               "delta_v_err": "delta_v_err_kms",
                               "muv_fit": "M_UV", "muv_fit_err": "M_UV_err",
-                              flag: "det"})
+                              "lya_det": "det"})
 
-    need = ["ID", f"fwhm_{fwhm_kind}_kms", f"fwhm_{fwhm_kind}_kms_err_mc",
-            "resolved", "fwhm_lsf_kms"]
-    props = pd.read_csv(fits_csv)
-    missing = [c for c in need if c not in props.columns]
-    if missing:
-        raise SystemExit(f"{missing} not in {fits_csv}. Run "
-                         "fit_lya_properties_grating.py and the MC merge first")
-    props = props[need].copy()
-    props["ID"] = props["ID"].astype(int)
-
-    df = cat.merge(props, on="ID", how="left")
+    df = cat
     df["fwhm"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms"], errors="coerce")
-    df["fwhm_err"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms_err_mc"],
-                                   errors="coerce")
-    df["resolved"] = df["resolved"].astype(str).str.lower().isin(["true", "1"])
+    df["fwhm_err"] = pd.to_numeric(df[f"fwhm_{fwhm_kind}_kms_err"], errors="coerce")
+    df["resolved"] = pd.to_numeric(df["fwhm_resolved"], errors="coerce") == 1
     # A failed fit has no FWHM at all, so it is not an 'unresolved' line.
     no_fit = ~np.isfinite(pd.to_numeric(df["fwhm_lsf_kms"], errors="coerce"))
     df.loc[no_fit, "resolved"] = True
@@ -239,11 +227,11 @@ def load_sample(catalog_csv, fits_csv, flag, fwhm_kind="int", resolve_frac=0.5,
         df.loc[~df["resolved"], "fwhm_err"] = np.nan
 
     for col in ("z_sys", "fwhm", "fwhm_err", "delta_v_kms", "delta_v_err_kms",
-                "M_UV", "M_UV_err", "det", "close_pair_group"):
+                "M_UV", "M_UV_err", "det", "in_analysis"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     bad_muv = ~(df["M_UV_err"] < muv_max_err)
     df.loc[bad_muv, ["M_UV", "M_UV_err"]] = np.nan
-    df["close_pair_group"] = df["close_pair_group"].fillna(0).astype(int)
+    df["in_analysis"] = df["in_analysis"].fillna(0).astype(int)
     return df
 
 
@@ -804,15 +792,9 @@ def plot_vs_muv_zbins(df, quantity, edges, path, title):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--detection", default="det_98",
-                   help="flag in lya_catalog.csv that defines a detection, "
-                        "e.g. det_98 (default), det_95, 99.5")
     p.add_argument("--sets", nargs="+", choices=list(SETS), default=list(SETS),
                    help="which sets to plot (default both)")
-    p.add_argument("--close-pairs", choices=["exclude", "include"], default="exclude",
-                   help="leave out close-pair sources (default) or keep them")
     p.add_argument("--catalog", default=LYA_CATALOG)
-    p.add_argument("--fits-csv", default=f"{pc.MUSE_CAT_DIR}/lya_fits_mc.csv")
     p.add_argument("--outdir", default=f"{pc.P2_ROOT}/plots/lya_science")
     p.add_argument("--fwhm-kind", choices=["int", "obs"], default="int",
                    help="intrinsic, LSF-corrected FWHM (int, default) or the "
@@ -840,18 +822,18 @@ def parse_args():
     return p.parse_args()
 
 
-def run_set(df, name, flag, args, outdir):
+def run_set(df, name, args, outdir, rule):
     """Every plot for one set (detections or non_detections)."""
     edges3 = list(args.z_edges)
     edges2 = [args.z_split]
     zsets = [(edges3, "zbins"), (edges2, "zbins2")]
     kind_tag = "" if args.fwhm_kind == "int" else "obs_"
-    stem = os.path.join(outdir, f"{flag}_{name}_{kind_tag}")
-    title = f"{flag} {name.replace('_', '-')}"
+    stem = os.path.join(outdir, f"{rule}_{name}_{kind_tag}")
+    title = f"{rule} {name.replace('_', '-')}"
 
     n_fit = int(df["delta_v_kms"].notna().sum())
     n_muv = int(df["M_UV"].notna().sum())
-    print(f"\n[{flag} {name}] {len(df)} sources, {n_fit} with a Lya fit, "
+    print(f"\n[{name}] {len(df)} sources, {n_fit} with a Lya fit, "
           f"{n_muv} with a usable M_UV")
     unres = df.loc[~df["resolved"] & df["fwhm"].notna(), "ID"].tolist()
     if unres:
@@ -951,31 +933,34 @@ def run_set(df, name, flag, args, outdir):
 def main():
     args = parse_args()
     set_fwhm_kind(args.fwhm_kind)
-    flag = normalise_flag(args.detection)
     outdir = os.path.abspath(args.outdir)
     print("plot_lya_science.py")
     print(f"  reading  {os.path.abspath(args.catalog)}")
-    print(f"  reading  {os.path.abspath(args.fits_csv)}")
-    print(f"  writing  {outdir}/{flag}_<set>_*.png")
-    print(f"  detection flag {flag}, FWHM {args.fwhm_kind}, close pairs {args.close_pairs}, "
+    rule = pc.det_rule(pd.read_csv(args.catalog))
+    print(f"  writing  {outdir}/{rule}_<detections|non_detections>_*.png")
+    print(f"  detection rule {rule}")
+    print(f"  FWHM {args.fwhm_kind}, in_analysis == 1 only, "
           f"M_UV only where muv_fit_err < {args.muv_max_err:g}")
 
-    df = load_sample(args.catalog, args.fits_csv, flag, args.fwhm_kind,
-                     args.resolve_frac, args.muv_max_err)
+    df = load_sample(args.catalog, args.fwhm_kind, args.resolve_frac, args.muv_max_err)
+    if "lya_model" in df.columns:
+        nd = int((df["lya_model"] == "double").sum())
+        print(f"  {nd} sources use the red peak of the double fit (lya_model double)")
     untested = df.loc[df["det"].isna(), "ID"].tolist()
     if untested:
         print(f"  not tested, in neither set: {untested}")
-    if args.close_pairs == "exclude":
-        cp = df.loc[df["close_pair_group"] > 0, "ID"].tolist()
-        if cp:
-            print(f"  close pairs left out: {cp}")
-        df = df[df["close_pair_group"] == 0]
+    out = df.loc[df["in_analysis"] == 0, ["ID", "pair_status"]]
+    for st in ("close_pair", "interloper"):
+        ids = out.loc[out["pair_status"] == st, "ID"].tolist()
+        if ids:
+            print(f"  left out ({st}): {ids}")
+    df = df[df["in_analysis"] == 1]
 
     os.makedirs(outdir, exist_ok=True)
     for name in args.sets:
-        run_set(df[df["det"] == SETS[name]].copy(), name, flag, args, outdir)
+        run_set(df[df["det"] == SETS[name]].copy(), name, args, outdir, rule)
     tag = "" if args.fwhm_kind == "int" else "obs_"
-    print(f"\n[DONE] figures in {outdir}, named {flag}_<detections|non_detections>_{tag}*.png")
+    print(f"\n[DONE] figures in {outdir}, named {rule}_<detections|non_detections>_{tag}*.png")
 
 
 if __name__ == "__main__":

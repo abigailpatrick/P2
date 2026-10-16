@@ -1,0 +1,2 @@
+det_rule,det_percentile,snr_threshold,extra_cut,dv_err_max,centre_err_max,n_snr_pass,n_detections,n_non_detections,pair_keep
+p95_dverr100,95.0,5.586,dv_err,100.0,,46,32,41,50803 51988

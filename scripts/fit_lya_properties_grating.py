@@ -65,6 +65,8 @@ Usage
 python fit_lya_properties_grating.py
 python fit_lya_properties_grating.py --ids 23070 50803
 python fit_lya_properties_grating.py --nb-window line
+python fit_lya_properties_grating.py --plots-only                       # redraw figures, no refit
+python fit_lya_properties_grating.py --plots-only --plot-halfwidth 60 --ids 31364
 """
 
 import argparse
@@ -596,10 +598,14 @@ def parse_args():
     p.add_argument("--dv-blue", type=float, default=300.0,
                    help="band edges for the dv_out_of_band flag, km/s")
     p.add_argument("--dv-red", type=float, default=1200.0)
-    p.add_argument("--plot-halfwidth", type=float, default=250.0, help="AA")
+    p.add_argument("--plot-halfwidth", type=float, default=150.0,
+                   help="half-width of the plotted spectrum about systemic, AA (default 150)")
     p.add_argument("--plot-bin", type=int, default=2,
                    help="rebin the plotted spectrum by this factor (display only)")
     p.add_argument("--no-plots", action="store_true")
+    p.add_argument("--plots-only", action="store_true",
+                   help="redraw <ID>_lya_fit.png from the saved fits in --outfile and the "
+                        "saved <ID>_lya_nb.fits, no refitting, nothing else is written")
     return p.parse_args()
 
 
@@ -706,9 +712,60 @@ def fit_source(row, slide, args):
     )
 
 
+def plots_only(args):
+    """Redraw <ID>_lya_fit.png from lya_fits.csv and the saved pseudo-NBs."""
+    out_path = os.path.abspath(args.outfile)
+    print(f"Reading fits        {out_path}")
+    print(f"Writing             {os.path.abspath(args.subcube_dir)}/<ID>/<ID>_lya_fit.png "
+          "(figures only)")
+    if not os.path.exists(out_path):
+        raise SystemExit(f"No {out_path}. Run the fit first")
+    fits_df = pd.read_csv(out_path)
+    fits_df["ID"] = fits_df["ID"].astype(int)
+    if args.ids:
+        fits_df = fits_df[fits_df["ID"].isin(args.ids)]
+    n = 0
+    for _, r in fits_df.iterrows():
+        sid = int(r["ID"])
+        spec_path = pc.muse_path(sid, "spectrum", args.subcube_dir)
+        if not os.path.exists(spec_path):
+            print(f"  {sid}  no spectrum, skipped")
+            continue
+        d = np.load(spec_path)
+        wave, flux, var = d["wave"], d["flux"], d["var"]
+        ok = str(r.get("fit_success", "")).lower() in ("true", "1")
+        fit = dict(fit_success=ok, flux_fit=r.get("flux_fit", np.nan), mu=r.get("mu", np.nan),
+                   sigma=r.get("sigma", np.nan), alpha_skew=r.get("alpha_skew", np.nan),
+                   sigma_lsf_ang=r.get("sigma_lsf_ang", np.nan),
+                   fwhm_int_kms=r.get("fwhm_int_kms", np.nan),
+                   resolved=str(r.get("resolved", "")).lower() in ("true", "1"))
+        det_win = ((float(r["det_win_min"]), float(r["det_win_max"]))
+                   if np.isfinite(r.get("det_win_min", np.nan)) else None)
+        nb, radius_pix = None, 3.0
+        nb_path = pc.muse_path(sid, "nb", args.subcube_dir)
+        if os.path.exists(nb_path):
+            with fits.open(nb_path) as h:
+                nb = np.array(h[1].data, dtype=float)
+                pixscale = float(np.mean(proj_plane_pixel_scales(WCS(h[1].header).celestial)) * 3600)
+            radius_pix = float(d["aperture"]) / pixscale
+        z_sys = float(r["z_sys"])
+        png = pc.muse_path(sid, "fit_png", args.subcube_dir)
+        plot_fit(png, sid, float(d["ra"]), float(d["dec"]), z_sys, wave, flux, var, fit,
+                 pc.lya_obs_air(z_sys), float(r.get("lya_peak_wave", np.nan)),
+                 float(r.get("delta_v_kms", np.nan)), det_win, float(r.get("lya_snr", np.nan)),
+                 nb, (int(d["x_pix"]), int(d["y_pix"])), radius_pix,
+                 args.plot_halfwidth, args.plot_bin)
+        n += 1
+    print(f"\n  redrew {n} figures, +/-{args.plot_halfwidth:g} AA, bin {args.plot_bin}")
+    print(f"Wrote  {os.path.abspath(args.subcube_dir)}/<ID>/<ID>_lya_fit.png")
+
+
 def main():
     args = parse_args()
     print("fit_lya_properties_grating.py")
+    if args.plots_only:
+        plots_only(args)
+        return
     print(f"Reading catalogue   {os.path.abspath(args.catalog)}")
     df = pc.load_sample(args.catalog, args.ids)
     print(f"  {len(df)} sources")

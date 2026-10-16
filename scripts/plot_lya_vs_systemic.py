@@ -4,7 +4,7 @@ plot_lya_vs_systemic.py
 
 Per-source figures comparing the MUSE Lya line with the NIRSpec line that set
 z_sys, for every source in lya_catalog.csv, and contact-sheet PDFs of the
-detections and non-detections.
+detections, the non-detections and the close pairs.
 
 Per source, in MUSE_subcubes/<ID>/
 -----------------------------------
@@ -25,19 +25,20 @@ Per source, in MUSE_subcubes/<ID>/
 
 PDFs, in plots/lya_systemic_pdfs/
 ---------------------------------
-  lya_systemic_panels_<flag>_detections.pdf
-  lya_systemic_panels_<flag>_non_detections.pdf
-  lya_systemic_overlay_<flag>_detections.pdf
-  lya_systemic_overlay_<flag>_non_detections.pdf
+  lya_systemic_<panels|overlay>_<tag>_<detections|non_detections|close_pairs>.pdf
 
-<flag> is the detection column of lya_catalog.csv used to split the sample,
---detection, default det_98 (Sigma_Lya above the pooled 98th percentile of
-the false positions). det_99_5 and det_95 are the other choices, and any
-det_ column build_lya_catalog.py was asked to make. The figures themselves do
-not depend on the flag, so --pdf-only remakes the PDFs for another flag in a
-few seconds without refitting. Sources not tested for Lya (lya_status not
-"ok", e.g. 65863 in the AO gap) still get their figures but are in neither
-PDF, and are listed on the first page of each.
+<tag> is the detection rule the catalogue was built with (det_rule, e.g. p95
+or p90_dverr100), so PDFs for different rules sit side by side.
+
+The sets come from lya_catalog.csv (build_lya_catalog.py, p2_common.
+lya_pdf_groups). Detections and non-detections are the sources with
+in_analysis == 1 split on lya_det. The close-pairs PDFs hold every source
+with pair_status == close_pair, detected or not, with its group number in
+the caption. Interlopers are in no PDF. Sources not tested for Lya (e.g.
+65863) still get their figures but are in no PDF, and are listed on the
+first page of each. Every PDF is sorted by S/N, highest first. The figures
+do not depend on the detection rule, so after a change to it --pdf-only
+remakes the PDFs in a few seconds without refitting.
 
 Where the lines come from
 -------------------------
@@ -49,6 +50,9 @@ grey band is the same model-mode bootstrap as mc_lya_errors_grating.py with
 Where the Lya fit failed there is no model or peak line, and the spectrum is
 normalised to its brightest pixel (after display binning) in the Lya band,
 -300/+1200 km/s, with a floor of 3 sigma so pure noise is not stretched.
+Where the catalogue prefers the double fit (lya_model double) the model is
+the double-peak model from lya_double_fits.csv instead, with no grey band,
+and the Delta_v line marks the red peak.
 
 Systemic line. lime_<line>_fits.csv keeps z, its error and the S/N but not
 the Gaussian parameters, so the fit is repeated here with lime_fit_lines.py's
@@ -83,17 +87,17 @@ Inputs
   MUSE_catalogs/lya_catalog.csv                   build_lya_catalog.py
   jwst_catalogs/primer_minerva_in_muse_zsys.csv   z_sys_line, z_sys_snr
   MUSE_catalogs/lya_fits_mc.csv                   Lya fit parameters
-  MUSE_catalogs/lya_false_pos_thresholds.csv      threshold quoted in the PDFs
+  MUSE_catalogs/lya_detection_cuts_<tag>.csv      the rule quoted in the PDFs
   jwst_catalogs/lime_<line>_fits.csv              z_used, method, band settings
   MUSE_subcubes/<ID>/<ID>_lya_spectrum.npz
   jwst_spectra_pm/<G>_<F>/<ID>_<G>_<F>_spectra_lime.fits
 
 Usage
 -----
-python plot_lya_vs_systemic.py --ids 23070 50803        # test, figures and PDFs
-python plot_lya_vs_systemic.py                          # all sources, det_98
-python plot_lya_vs_systemic.py --pdf-only --detection det_99_5
-python plot_lya_vs_systemic.py --pdf-only --detection 95
+python plot_lya_vs_systemic.py --ids 23070 50803        # test, figures only
+python plot_lya_vs_systemic.py                          # all sources
+python plot_lya_vs_systemic.py --pdf-only               # PDFs only, after a new catalogue
+python plot_lya_vs_systemic.py --pdf-only --catalog /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_catalog_p90.csv
 """
 
 import argparse
@@ -111,7 +115,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 import p2_common as pc
 import fit_lya_properties_grating as flp
-from make_lya_fit_pdfs import load_png
+from make_lya_fit_pdfs import load_png, rule_text, cuts_for
 
 C_KMS = pc.C_KMS
 LYA_REST = pc.LYA_REST
@@ -215,24 +219,15 @@ def y_limits(flux_list, err_list, pad_frac=0.12):
     return lo - pad, hi + pad
 
 
-def flag_name(s):
-    """det_98, 98 or 98.0 -> det_98. 99.5 -> det_99_5."""
-    s = str(s)
-    if s.startswith("det_"):
-        return s
-    return "det_" + f"{float(s):g}".replace(".", "_")
-
-
-# ---------------------------------------------------------------------------
-# MUSE Lya
-# ---------------------------------------------------------------------------
 def load_lya(npz_path, frow, z_sys, n_mc, rng, fit_window, sigma_min, alpha_max,
-             dv_blue, dv_red):
+             dv_blue, dv_red, drow=None):
     """MUSE spectrum and the science Lya fit, in vacuum wavelength.
 
     With a successful fit the model is flp.skew_model_lsf at the saved
-    parameters and everything is normalised to its peak. Without one there
-    is no model, and the normalisation is set later from the data
+    parameters and everything is normalised to its peak. Where the catalogue
+    prefers the double fit (drow, its row of lya_double_fits.csv) the model is
+    the double-peak model instead, with no MC band. Without a fit there is no
+    model, and the normalisation is set later from the data
     (normalise_no_fit) once the display binning is known.
     """
     d = np.load(npz_path)
@@ -243,6 +238,18 @@ def load_lya(npz_path, frow, z_sys, n_mc, rng, fit_window, sigma_min, alpha_max,
     out = dict(wave=flp.air_to_vac(wave_air), flux=flux, err=err, grid=None, model=None,
                lo=None, hi=None, n_mc=0, peak_check_kms=np.nan, has_fit=False, norm=1.0)
 
+    if drow is not None:
+        from fit_lya_double_peak import double_model
+        par = [float(drow[k]) for k in ("flux_blue", "mu_blue", "sigma_blue", "flux_red",
+                                         "mu_red", "sigma_red", "alpha_red", "sigma_lsf_ang")]
+        grid_air = np.linspace(par[1] - 8 * max(par[2], par[7]) - 5,
+                               par[4] + 12 * max(par[5], par[7]) + 5, 1500)
+        best = double_model(grid_air, *par)
+        peak = float(np.nanmax(best))
+        out.update(flux=flux / peak, err=err / peak, grid=flp.air_to_vac(grid_air),
+                   model=best / peak, has_fit=True, norm=peak, double=True)
+        return out
+
     ok = frow is not None and str(frow.get("fit_success", False)).lower() in ("true", "1") and np.all(
         np.isfinite([float(frow[k]) for k in ("mu", "sigma", "alpha_skew", "flux_fit",
                                               "sigma_lsf_ang")]))
@@ -250,6 +257,7 @@ def load_lya(npz_path, frow, z_sys, n_mc, rng, fit_window, sigma_min, alpha_max,
         lam = pc.LYA_REST * (1 + z_sys)
         out["band_vac"] = (lam * (1 - dv_blue / C_KMS), lam * (1 + dv_red / C_KMS))
         return out
+
 
     mu, sig, alpha, ftot, s_lsf = (float(frow[k]) for k in
                                    ("mu", "sigma", "alpha_skew", "flux_fit", "sigma_lsf_ang"))
@@ -469,10 +477,11 @@ def draw_panel(ax, s, lam_sys, vrange, text_lines, peak_wave=None,
 def dv_text(src):
     if not np.isfinite(src["delta_v"]):
         return r"no Ly$\alpha$ fit"
+    lab = r"\Delta v_{\rm red}" if src.get("double") else r"\Delta v"
     if np.isfinite(src["delta_v_err"]):
-        return (rf"$\Delta v = {src['delta_v']:.0f} \pm {src['delta_v_err']:.0f}$"
+        return (rf"${lab} = {src['delta_v']:.0f} \pm {src['delta_v_err']:.0f}$"
                 r" km s$^{-1}$")
-    return rf"$\Delta v = {src['delta_v']:.0f}$ km s$^{{-1}}$"
+    return rf"${lab} = {src['delta_v']:.0f}$ km s$^{{-1}}$"
 
 
 def figure_panels(src, lya, sysl, out_path, vr_lya, vr_sys, dpi, doublet_pad):
@@ -574,8 +583,11 @@ def make_source(sid, row, frow, lrow, lfl, a):
 
     z_sys = float(row["z_sys"])
     rng = np.random.default_rng(a.seed + sid)
+    drow = None
+    if row.get("lya_model") == "double" and a.double_fits is not None and sid in a.double_fits.index:
+        drow = a.double_fits.loc[sid]
     lya = load_lya(npz_path, frow, z_sys, a.n_mc, rng, a.fit_window, a.sigma_min,
-                   a.alpha_max, a.dv_blue, a.dv_red)
+                   a.alpha_max, a.dv_blue, a.dv_red, drow=drow)
     try:
         sysl = load_systemic(lfl, line, lime_path, lrow, z_sys, a.n_mc, rng)
     except Exception as e:
@@ -599,7 +611,8 @@ def make_source(sid, row, frow, lrow, lfl, a):
                lya_snr=float(row["lya_snr"]), z_sys_snr=float(row["z_sys_snr"]),
                delta_v=delta_v, delta_v_err=float(row["delta_v_err"]),
                lam_lya_sys=lam_lya_sys, lam_line_sys=lam_line_sys,
-               lam_lya_peak=wave_from_v(delta_v, lam_lya_sys) if np.isfinite(delta_v) else None)
+               lam_lya_peak=wave_from_v(delta_v, lam_lya_sys) if np.isfinite(delta_v) else None,
+               double=bool(lya.get("double", False)))
 
     p1 = pc.muse_path(sid, "systemic_panels_png", a.subcube_dir)
     p2 = pc.muse_path(sid, "systemic_overlay_png", a.subcube_dir)
@@ -617,28 +630,44 @@ def make_source(sid, row, frow, lrow, lfl, a):
 # ---------------------------------------------------------------------------
 # PDFs
 # ---------------------------------------------------------------------------
-def caption(r):
-    parts = [f"ID {int(r['ID'])}", rf"$\Sigma$ = {r['lya_snr']:.2f}",
-             f"z_sys = {r['z_sys']:.4f}"]
+TITLES = {"detections": "detections", "non_detections": "non-detections",
+          "close_pairs": "close pairs (not in the analysis)"}
+
+
+def caption(r, with_group=False):
+    parts = [f"ID {int(r['ID'])}"]
+    if with_group:
+        parts.append(f"group {int(r['close_pair_group'])}")
+    parts += [rf"$\Sigma$ = {r['lya_snr']:.2f}", f"z_sys = {r['z_sys']:.4f}"]
     if pd.notna(r["delta_v"]):
-        parts.append(rf"$\Delta v$ = {r['delta_v']:.0f} km/s")
+        e = (f" $\\pm$ {r['delta_v_err']:.0f}" if pd.notna(r.get("delta_v_err")) else "")
+        if pd.notna(r.get("lya_centre_err")):
+            e += f" (centre $\\pm$ {r['lya_centre_err']:.0f})"
+        dbl = r.get("lya_model") == "double"
+        lab = r"$\Delta v_{\rm red}$" if dbl else r"$\Delta v$"
+        parts.append(rf"{lab} = {r['delta_v']:.0f}{e} km/s" + (" (double)" if dbl else ""))
+    parts.append(pc.det_label(r))
     return "    ".join(parts)
 
 
-def summary_page(pdf, title, subtitle, rows, untested, missing_note):
+def summary_page(pdf, title, subtitle, rows, untested, missing_note, with_reason):
     fig = plt.figure(figsize=A4)
     fig.text(0.08, 0.95, title, fontsize=14, weight="bold", va="top")
-    fig.text(0.08, 0.92, subtitle, fontsize=10, va="top")
-    lines = [f"{int(r['ID']):>6d}   {r['lya_snr']:6.2f}" for _, r in rows.iterrows()]
+    fig.text(0.08, 0.92, subtitle, fontsize=9, va="top")
+    fig.text(0.08, 0.895, f"{len(rows)} sources, sorted by S/N", fontsize=9, va="top")
+    lines = []
+    for _, r in rows.iterrows():
+        extra = f"  {r['det_reason']}" if with_reason and r.get("det_reason") else ""
+        lines.append(f"{int(r['ID']):>6d}  {r['lya_snr']:6.2f}{extra}")
     ncol = 3
     per_col = int(np.ceil(len(lines) / ncol)) if lines else 0
     for c in range(ncol):
         chunk = lines[c * per_col:(c + 1) * per_col]
-        fig.text(0.08 + c * 0.3, 0.88, "    ID      S/N\n" + "\n".join(chunk),
-                 family="monospace", fontsize=8, va="top")
+        fig.text(0.08 + c * 0.3, 0.86, "    ID     S/N\n" + "\n".join(chunk),
+                 family="monospace", fontsize=7.5, va="top")
     foot = []
     if untested:
-        foot.append("Not tested for Lya, in neither PDF: " + ", ".join(map(str, untested)))
+        foot.append("Not tested for Lya, in no PDF: " + ", ".join(map(str, untested)))
     if missing_note:
         foot.append(missing_note)
     if foot:
@@ -647,7 +676,7 @@ def summary_page(pdf, title, subtitle, rows, untested, missing_note):
     plt.close(fig)
 
 
-def write_pdf(path, kind, title, subtitle, rows, untested, a):
+def write_pdf(path, kind, title, subtitle, rows, untested, a, with_group, with_reason):
     """kind 'panels' (4 per page, one column) or 'overlay' (8 per page)."""
     key = "systemic_panels_png" if kind == "panels" else "systemic_overlay_png"
     nrow, ncol = (4, 1) if kind == "panels" else (4, 2)
@@ -656,7 +685,7 @@ def write_pdf(path, kind, title, subtitle, rows, untested, a):
                if not os.path.exists(pc.muse_path(int(i), key, a.subcube_dir))]
     note = f"No figure (see the run log): {', '.join(map(str, missing))}" if missing else ""
     with PdfPages(path) as pdf:
-        summary_page(pdf, title, subtitle, rows, untested, note)
+        summary_page(pdf, title, subtitle, rows, untested, note, with_reason)
         for start in range(0, len(rows), per_page):
             chunk = rows.iloc[start:start + per_page]
             fig, axes = plt.subplots(nrow, ncol, figsize=A4)
@@ -668,7 +697,8 @@ def write_pdf(path, kind, title, subtitle, rows, untested, a):
                 else:
                     ax.text(0.5, 0.5, f"no figure\n{png}", ha="center", va="center",
                             fontsize=6, transform=ax.transAxes)
-                ax.set_title(caption(r), fontsize=7 if kind == "overlay" else 8, loc="left")
+                ax.set_title(caption(r, with_group), fontsize=6 if kind == "overlay" else 7.5,
+                             loc="left")
                 ax.set_axis_off()
             for ax in axes[len(chunk):]:
                 ax.set_axis_off()
@@ -678,36 +708,27 @@ def write_pdf(path, kind, title, subtitle, rows, untested, a):
     return missing
 
 
-def make_pdfs(cat, flag, a):
-    if flag not in cat.columns:
-        have = [c for c in cat.columns if c.startswith("det_")]
-        raise SystemExit(f"No {flag} in {a.catalog}. It has {have}. Add levels with "
-                         "build_lya_catalog.py --levels")
-    thr_txt = ""
-    pcol = "p" + flag[len("det_"):]
-    if os.path.exists(a.thresholds):
-        thr = pd.read_csv(a.thresholds).iloc[0]
-        if pcol in thr:
-            thr_txt = rf", threshold $\Sigma$ = {float(thr[pcol]):.2f}"
-    pct = flag[len("det_"):].replace("_", ".")
-    tested = cat[cat["lya_status"] == "ok"].sort_values("lya_snr", ascending=False)
-    untested = cat.loc[cat["lya_status"] != "ok", "ID"].astype(int).tolist()
-    groups = {"detections": tested[tested[flag] == 1],
-              "non_detections": tested[tested[flag] == 0]}
+def make_pdfs(cat, a):
+    cat = cat.copy()
+    cat["det_reason"] = cat["det_reason"].fillna("")
+    groups, untested, interlopers = pc.lya_pdf_groups(cat)
+    tag, cuts = cuts_for(cat, a.catalog, a.cuts)
+    rule = rule_text(cuts)
     os.makedirs(a.outdir, exist_ok=True)
-    thr_plain = thr_txt.replace(r"$\Sigma$", "Sigma")
-    print(f"\nPDFs, detection = {flag} (Sigma_Lya above the pooled {pct}th percentile"
-          f"{thr_plain})")
+    print(f"\nPDFs  ({rule_text(cuts, tex=False)})")
     for kind in ("panels", "overlay"):
         for name, rows in groups.items():
-            path = os.path.join(os.path.abspath(a.outdir), f"lya_systemic_{kind}_{flag}_{name}.pdf")
-            title = f"Lya vs systemic ({kind}), {name.replace('_', '-')}"
-            sub = (f"{flag}: above the {pct}th percentile{thr_txt}. "
-                   f"{len(rows)} sources, sorted by S/N")
-            missing = write_pdf(path, kind, title, sub, rows, untested, a)
+            path = os.path.join(os.path.abspath(a.outdir),
+                                f"lya_systemic_{kind}_{tag}_{name}.pdf")
+            title = f"Lya vs systemic ({kind}), {TITLES[name]} ({tag})"
+            missing = write_pdf(path, kind, title, rule, rows, untested, a,
+                                with_group=name == "close_pairs",
+                                with_reason=name != "detections")
             print(f"  {kind:<8} {name:<15} {len(rows):>3d} sources  {path}")
             if missing:
                 print(f"           WARNING no figure for {missing}")
+    if interlopers:
+        print(f"  interlopers, in no PDF: {interlopers}")
 
 
 # ---------------------------------------------------------------------------
@@ -719,16 +740,17 @@ def parse_args():
     p.add_argument("--catalog", default=pc.LYA_CATALOG)
     p.add_argument("--zsys", default=pc.ZSYS_CATALOG)
     p.add_argument("--fits-csv", default=f"{CAT}/lya_fits_mc.csv")
-    p.add_argument("--thresholds", default=f"{CAT}/lya_false_pos_thresholds.csv")
+    p.add_argument("--double-csv", default=f"{CAT}/lya_double_fits.csv",
+                   help="fit_lya_double_peak.py output. Sources the catalogue marks "
+                        "lya_model double are drawn with the double-peak model")
+    p.add_argument("--cuts", default=None,
+                   help="default lya_detection_cuts_<tag>.csv next to the catalogue")
     p.add_argument("--lime-dir", default=f"{P2}/jwst_catalogs",
                    help="holds lime_<line>_fits.csv")
     p.add_argument("--spectra-root", default=f"{P2}/jwst_spectra_pm")
     p.add_argument("--subcube-dir", default=pc.MUSE_SUBCUBE_DIR)
     p.add_argument("--outdir", default=f"{P2}/plots/lya_systemic_pdfs")
     p.add_argument("--ids", type=int, nargs="+", default=None)
-    p.add_argument("--detection", default="det_98",
-                   help="flag column that defines a detection, det_99_5, det_98, det_95 "
-                        "(or 99.5, 98, 95). It is written into the PDF names")
     p.add_argument("--pdf-only", action="store_true",
                    help="only remake the PDFs from the existing figures (no LiMe needed)")
     p.add_argument("--no-pdf", action="store_true")
@@ -758,15 +780,13 @@ def parse_args():
 
 def main():
     a = parse_args()
-    flag = flag_name(a.detection)
     print("plot_lya_vs_systemic.py")
-    for k in ("catalog", "zsys", "fits_csv", "thresholds", "lime_dir", "spectra_root",
+    for k in ("catalog", "zsys", "fits_csv", "double_csv", "lime_dir", "spectra_root",
               "subcube_dir", "outdir"):
         setattr(a, k, os.path.abspath(getattr(a, k)))
         print(f"  {k:<13} {getattr(a, k)}")
     print(f"  figures       {a.subcube_dir}/<ID>/<ID>_lya_systemic_panels.png, "
           "<ID>_lya_systemic_overlay.png")
-    print(f"  detection     {flag}")
 
     cat = pd.read_csv(a.catalog)
     cat["ID"] = cat["ID"].astype(int)
@@ -785,6 +805,17 @@ def main():
         fits = pd.read_csv(a.fits_csv)
         fits["ID"] = fits["ID"].astype(int)
         fits = fits.set_index("ID")
+        a.double_fits = None
+        if os.path.exists(a.double_csv):
+            dd = pd.read_csv(a.double_csv)
+            dd["ID"] = dd["ID"].astype(int)
+            if "alpha_red" in dd.columns:
+                a.double_fits = dd.set_index("ID")
+            else:
+                print(f"  WARNING {a.double_csv} has no fit parameters, rerun "
+                      "fit_lya_double_peak.py. Double sources drawn with the single fit")
+        n_dbl = int((cat.get("lya_model") == "double").sum()) if "lya_model" in cat else 0
+        print(f"  {n_dbl} sources drawn with the double-peak model (lya_model double)")
         lime = {}
         for line in sorted(cat["z_sys_line"].dropna().unique()):
             path = os.path.join(a.lime_dir, f"lime_{line}_fits.csv")
@@ -822,7 +853,10 @@ def main():
                   f"(refitted by hand?)  {warned}")
 
     if not a.no_pdf:
-        make_pdfs(cat, flag, a)
+        if a.ids:
+            print("\nPDFs not remade for an --ids run, use --pdf-only once all figures exist")
+        else:
+            make_pdfs(cat, a)
 
 
 if __name__ == "__main__":
