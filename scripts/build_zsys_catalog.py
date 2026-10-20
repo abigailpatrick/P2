@@ -2,13 +2,24 @@
 """Build the systemic redshift catalogue of the PRIMER + MINERVA sample.
 
 Replaces merge_systematic_redshifts.py and the old build_zsys_catalog.py.
-Reads the per-line LiMe summaries from lime_fit_lines.py, gathers the best
-successful fit of each line per source, and applies the z_sys rule in
+Reads the per-grating LiMe fits of [OIII] and Halpha from lime_fit_lines.py
+(lime_<line>_fits.csv), gathers the best successful fit of each line per
+source inside and outside its grating's nominal wavelength range
+(p2_common.NIRSPEC_NOMINAL_UM), and applies the z_sys rule in
 p2_common.pick_zsys:
 
-    1. [OIII] if it is detected, A/noise >= --oiii-snr-min (5)
-    2. otherwise Halpha if detected, A/noise >= --ha-snr-min (5)
-    3. otherwise no z_sys, and the source is dropped from the z_sys sample
+    1. [OIII] inside the nominal range, A/noise >= --oiii-snr-min (5)
+    2. otherwise Halpha inside the nominal range, A/noise >= --ha-snr-min (5)
+    3. otherwise [OIII] outside the nominal range, A/noise >= 5
+    4. otherwise Halpha outside the nominal range, A/noise >= 5
+    5. otherwise no z_sys, and the source is dropped from the z_sys sample
+
+The DJA spectra run beyond each grating's nominal range (G235M to 3.07
+micron, G235H 3.05, G395M 5.10, G395H 5.14). There the calibration is less
+certain, and above ~3.4 micron in G235 second-order light contaminates. In
+the October 2026 fits 18264 had [OIII] at 3.27 micron in G235M 139 km/s from
+its Halpha inside G395M, so a line inside the range is always preferred.
+z_sys_in_range is 0 where the z_sys line is outside it (steps 3 and 4).
 
 A/noise is the fitted amplitude over the flux scatter in the adjacent
 continuum bands, and 5 is the LiMe paper's detection boundary (Fernandez et
@@ -21,19 +32,22 @@ for reference but are not used for z_sys.
 Inputs
 ------
   jwst_catalogs/primer_minerva_in_muse.csv
-  jwst_catalogs/lime_OIII_summary.csv, lime_Ha_summary.csv,
-  lime_Hbeta_summary.csv, lime_OII_summary.csv
+  jwst_catalogs/lime_OIII_fits.csv, lime_Ha_fits.csv       z_sys lines, per grating
+  jwst_catalogs/lime_<line>_summary.csv (all four lines)   which gratings were fitted,
+                                                           and Hbeta and [OII] for reference
 
 Outputs
 -------
   jwst_catalogs/systemic_redshifts.csv
       every source in primer_minerva_in_muse.csv, with z_<line>, z_<line>_err,
-      z_<line>_snr, z_<line>_grating for OIII, Ha, Hbeta, OII, and the z_sys
-      columns below (blank where there is no z_sys)
+      z_<line>_snr, z_<line>_grating for OIII, Ha, Hbeta, OII (for OIII and
+      Ha the best fit inside the nominal range, and z_<line>_ext... the best
+      outside it), and the z_sys columns below (blank where there is no z_sys)
   jwst_catalogs/primer_minerva_in_muse_zsys.csv
       the rows of primer_minerva_in_muse.csv with a z_sys, plus
-      z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating, and
-      dv_sys_dja_kms, the DJA redshift of the z_sys grating relative to z_sys
+      z_sys, z_sys_err, z_sys_snr, z_sys_line, z_sys_grating, z_sys_in_range
+      (1 inside the nominal range, 0 outside), and dv_sys_dja_kms, the DJA
+      redshift of the z_sys grating relative to z_sys
   jwst_catalogs/primer_minerva_full_in_muse_with_grating_zsys.csv
       the same sources, with every column of Isaac's catalogue exactly as
       delivered (Number, RA, Dec, all bands, -99 kept) plus only z_sys,
@@ -57,7 +71,32 @@ import p2_common as pc
 P2 = pc.P2_ROOT
 CAT_DIR = f"{P2}/jwst_catalogs"
 LINES = ["OIII", "Ha", "Hbeta", "OII"]
-ZSYS_COLS = ["z_sys", "z_sys_err", "z_sys_snr", "z_sys_line", "z_sys_grating", "dv_sys_dja_kms"]
+ZSYS_COLS = ["z_sys", "z_sys_err", "z_sys_snr", "z_sys_line", "z_sys_grating", "z_sys_in_range",
+             "dv_sys_dja_kms"]
+ZSYS_LINES = ("OIII", "Ha")
+
+
+def best_fits(path, line):
+    """Best successful fit per source inside and outside the nominal range.
+    Returns a frame with z_<line>, _err, _snr, _grating and the same with
+    _ext, indexed by ID."""
+    f = pd.read_csv(path)
+    f["ID"] = f["ID"].astype(int)
+    f = f[f["success"].astype(str).str.strip().str.lower().isin(["true", "1", "1.0"])].copy()
+    for c in ("z", "z_err", "snr"):
+        f[c] = pd.to_numeric(f[c], errors="coerce")
+    f = f[np.isfinite(f["z"])]
+    lam = (1 + f["z"]) * pc.ZSYS_REST_UM[line]
+    f["inside"] = [pc.in_nominal_range(g, l) for g, l in zip(f["grating"], lam)]
+    out = []
+    for inside, suffix in ((True, ""), (False, "_ext")):
+        b = (f[f["inside"] == inside].sort_values("snr", ascending=False)
+             .drop_duplicates("ID").set_index("ID"))
+        b = b[["z", "z_err", "snr", "grating"]]
+        b.columns = [f"z_{line}{suffix}", f"z_{line}{suffix}_err", f"z_{line}{suffix}_snr",
+                     f"z_{line}{suffix}_grating"]
+        out.append(b)
+    return pd.concat(out, axis=1)
 
 
 def parse_args():
@@ -79,8 +118,10 @@ def why_dropped(r, cuts):
     """Short reason a source has no z_sys."""
     parts = []
     for line in ("OIII", "Ha"):
-        if pd.notna(r.get(f"z_{line}")):
-            parts.append(f"{line} A/noise {r[f'z_{line}_snr']:.1f} ({r[f'z_{line}_grating']}) "
+        key = next((k for k in (f"z_{line}", f"z_{line}_ext") if pd.notna(r.get(k))), None)
+        if key is not None:
+            parts.append(f"{line} A/noise {r[f'{key}_snr']:.1f} ({r[f'{key}_grating']}"
+                         f"{', outside nominal range' if key.endswith('_ext') else ''}) "
                          f"below {cuts[line]:g}")
         elif r.get(f"{line}_fitted"):
             parts.append(f"{line} fitted in {r[f'{line}_fitted']} but never successful")
@@ -112,6 +153,14 @@ def main():
         s["ID"] = s["ID"].astype(int)
         s = s[["ID", f"z_{line}", f"z_{line}_err", f"z_{line}_snr", f"z_{line}_grating",
                "gratings_fitted"]].rename(columns={"gratings_fitted": f"{line}_fitted"})
+        if line in ZSYS_LINES:
+            # the z columns come from the per-grating fits, split by range
+            fpath = os.path.abspath(os.path.join(a.lime_dir, f"lime_{line}_fits.csv"))
+            if not os.path.exists(fpath):
+                raise SystemExit(f"ERROR {fpath} missing, needed for the nominal-range split")
+            print(f"  reading        {fpath}")
+            s = s[["ID", f"{line}_fitted"]].merge(best_fits(fpath, line).reset_index(),
+                                                  on="ID", how="outer")
         sysz = sysz.merge(s, on="ID", how="left")
         sysz[f"{line}_fitted"] = sysz[f"{line}_fitted"].fillna("")
 
@@ -121,6 +170,9 @@ def main():
     sysz["z_sys_snr"] = [p[2] for p in picks]
     sysz["z_sys_line"] = [p[3] for p in picks]
     sysz["z_sys_grating"] = [p[4] for p in picks]
+    sysz["z_sys_in_range"] = [
+        (int(pc.in_nominal_range(g, (1 + z) * pc.ZSYS_REST_UM[l])) if isinstance(l, str) else np.nan)
+        for z, l, g in zip(sysz["z_sys"], sysz["z_sys_line"], sysz["z_sys_grating"])]
     z_dja = [cat.set_index("ID").loc[i, f"z_{g}"] if isinstance(g, str) else np.nan
              for i, g in zip(sysz["ID"], sysz["z_sys_grating"])]
     sysz["dv_sys_dja_kms"] = pc.dz_to_kms(np.asarray(z_dja, float), sysz["z_sys"])
@@ -133,10 +185,15 @@ def main():
     print("\n--- Summary ---")
     print(f"  sources in catalogue          {len(cat)}")
     for line in LINES:
-        print(f"  successful {line:<6} fit          {int(sysz[f'z_{line}'].notna().sum())}")
+        n_ext = (f"  (+{int((sysz[f'z_{line}'].isna() & sysz[f'z_{line}_ext'].notna()).sum())} "
+                 "only outside the nominal range)") if f"z_{line}_ext" in sysz.columns else ""
+        print(f"  successful {line:<6} fit          {int(sysz[f'z_{line}'].notna().sum())}{n_ext}")
     print(f"  z_sys from [OIII]             {int((sysz['z_sys_line'] == 'OIII').sum())}")
     print(f"  z_sys from Halpha             {int((sysz['z_sys_line'] == 'Ha').sum())}")
-    print(f"  z_sys by grating              "
+    print(f"  z_sys inside nominal range    {int((sysz['z_sys_in_range'] == 1).sum())}")
+    print(f"  z_sys outside nominal range   {int((sysz['z_sys_in_range'] == 0).sum())}  "
+          + str(sysz.loc[sysz['z_sys_in_range'] == 0, 'ID'].tolist()))
+    print("  z_sys by grating              "
           + ", ".join(f"{g} {n}" for g, n in sysz["z_sys_grating"].value_counts().items()))
     print(f"  with z_sys (kept)             {int(has.sum())}")
     print(f"  without z_sys (dropped)       {int((~has).sum())}")
@@ -155,6 +212,16 @@ def main():
         print(f"\nCompared with the existing {a.out_zsys}")
         print(f"  gained {sorted(new - old)}")
         print(f"  lost   {sorted(old - new)}")
+        o = pd.read_csv(a.out_zsys)
+        o["ID"] = o["ID"].astype(int)
+        both = o.merge(zsys, on="ID", suffixes=("_old", ""))
+        dv = pc.dz_to_kms(both["z_sys"], both["z_sys_old"])
+        moved = both[np.abs(dv) > 1.0]
+        print(f"  z_sys changed for {len(moved)} (rerun the MUSE steps 9 to 14b for these)")
+        for (_, r), d in zip(moved.iterrows(), dv[np.abs(dv) > 1.0]):
+            print(f"    {int(r['ID']):<7d} {r['z_sys_old']:.5f} ({r['z_sys_line_old']} "
+                  f"{r['z_sys_grating_old']}) -> {r['z_sys']:.5f} ({r['z_sys_line']} "
+                  f"{r['z_sys_grating']})  {d:+.0f} km/s")
 
     if a.dry_run:
         print("\nDry run, nothing written.")

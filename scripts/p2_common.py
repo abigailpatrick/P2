@@ -8,7 +8,15 @@ The rule, applied to a row of systemic_redshifts.csv (build_zsys_catalog.py)
 -----------------------------------------------------------------------------
     1. [OIII] if z_OIII_snr >= 5
     2. Halpha if z_Ha_snr   >= 5
-    3. otherwise no z_sys
+    3. [OIII] if z_OIII_ext_snr >= 5
+    4. Halpha if z_Ha_ext_snr   >= 5
+    5. otherwise no z_sys
+z_<line> is the best fit with the line inside its grating's nominal
+wavelength range (NIRSPEC_NOMINAL_UM), z_<line>_ext the best fit outside it,
+where the DJA spectra continue but the calibration is less certain and,
+above ~3.4 micron in G235, second-order light contaminates. So a line inside
+the range is always preferred, and one outside it is only used if no line
+inside passes.
 
 z_<line>_snr is A / noise, the fitted line amplitude over the flux scatter in
 the adjacent continuum bands (lime_fit_lines.py). 5 is the LiMe paper's
@@ -36,8 +44,19 @@ LYA_REST = 1215.67          # AA, vacuum
 # Lines tried in order, each with its S/N threshold (strictly greater than).
 LINE_PRIORITY = ["OIII", "Ha"]
 SNR_MIN = {"OIII": 5.0, "Ha": 5.0}
+ZSYS_REST_UM = {"OIII": 0.500824, "Ha": 0.656461}   # vacuum, [OIII] 5007 and Halpha
 
 GRATINGS = ["G235M", "G235H", "G395M", "G395H"]
+# Nominal wavelength range of each grating with its filter, micron (JDox,
+# NIRSpec dispersers and filters). The DJA spectra run beyond these limits.
+NIRSPEC_NOMINAL_UM = {"G235M": (1.66, 3.07), "G235H": (1.66, 3.05),
+                      "G395M": (2.87, 5.10), "G395H": (2.87, 5.14)}
+
+
+def in_nominal_range(grating, lam_um):
+    """True if lam_um (observed, micron) is inside the grating's nominal range."""
+    lo, hi = NIRSPEC_NOMINAL_UM.get(str(grating), (np.nan, np.nan))
+    return bool(lo <= lam_um <= hi)
 
 # ----------------------------------------------------------------------
 # MUSE per-source files
@@ -91,6 +110,28 @@ LYA_DET_SNR = 5.0
 CLOSE_PAIR_KEEP = (50803, 51988)
 
 FALSE_POS_SOURCES = f"{MUSE_CAT_DIR}/lya_false_pos_sources.csv"   # manifest
+
+# ----------------------------------------------------------------------
+# Preferred Lya model. The one rule for which fit a source's line
+# quantities come from, used by build_lya_catalog.py (lya_model) and by
+# measure_lya_shape.py (f_blue), so the two can never disagree. Both read
+# MUSE_catalogs/lya_fits_mc.csv for the single fit and
+# MUSE_catalogs/lya_double_fits.csv for the double fit.
+LYA_FITS_MC = f"{MUSE_CAT_DIR}/lya_fits_mc.csv"
+LYA_DOUBLE_FITS = f"{MUSE_CAT_DIR}/lya_double_fits.csv"
+
+
+def preferred_lya_model(z_lya_single, double_peak):
+    """'double' if the single fit exists (z_lya in lya_fits_mc.csv is finite)
+    and fit_lya_double_peak.py set double_peak = 1, 'single' if only the
+    single fit exists, '' if there is no fit."""
+    if z_lya_single is None or pd.isna(z_lya_single):
+        return ""
+    try:
+        dbl = pd.notna(double_peak) and int(double_peak) == 1
+    except (TypeError, ValueError):
+        dbl = False
+    return "double" if dbl else "single"
 
 
 def muse_path(sid, kind, root=MUSE_SUBCUBE_DIR):
@@ -155,25 +196,29 @@ def pick_zsys(row, snr_min=None):
 
     row is one row of systemic_redshifts.csv (a Series or dict).
     snr_min optionally overrides SNR_MIN, e.g. {"OIII": 5, "Ha": 7}.
-    Everything is NaN / None when no line passes.
+    Fits inside the nominal grating range (z_<line>) are tried first, then
+    those outside it (z_<line>_ext, absent in older files). Everything is
+    NaN / None when no line passes.
     """
     cuts = dict(SNR_MIN)
     if snr_min:
         cuts.update(snr_min)
-    for line in LINE_PRIORITY:
-        z = row.get(f"z_{line}")
-        snr = row.get(f"z_{line}_snr")
-        if z is None or pd.isna(z) or snr is None or pd.isna(snr):
-            continue
-        if not float(snr) >= cuts[line]:
-            continue
-        z_err = row.get(f"z_{line}_err")
-        grating = row.get(f"z_{line}_grating")
-        return (float(z),
-                float(z_err) if pd.notna(z_err) else np.nan,
-                float(snr),
-                line,
-                grating if isinstance(grating, str) else None)
+    for suffix in ("", "_ext"):
+        for line in LINE_PRIORITY:
+            key = f"z_{line}{suffix}"
+            z = row.get(key)
+            snr = row.get(f"{key}_snr")
+            if z is None or pd.isna(z) or snr is None or pd.isna(snr):
+                continue
+            if not float(snr) >= cuts[line]:
+                continue
+            z_err = row.get(f"{key}_err")
+            grating = row.get(f"{key}_grating")
+            return (float(z),
+                    float(z_err) if pd.notna(z_err) else np.nan,
+                    float(snr),
+                    line,
+                    grating if isinstance(grating, str) else None)
     return np.nan, np.nan, np.nan, None, None
 
 
@@ -182,7 +227,8 @@ def rule_text(snr_min=None):
     cuts = dict(SNR_MIN)
     if snr_min:
         cuts.update(snr_min)
-    return ", then ".join(f"{l} A/noise >= {cuts[l]:g}" for l in LINE_PRIORITY) + ", else none"
+    inside = ", then ".join(f"{l} A/noise >= {cuts[l]:g}" for l in LINE_PRIORITY)
+    return f"{inside}, inside the nominal grating range first, then outside it, else none"
 
 
 def fallback_grating(g_row, oiii_row=None):

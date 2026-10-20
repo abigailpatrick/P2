@@ -792,6 +792,9 @@ def main():
     cat["ID"] = cat["ID"].astype(int)
     zs = pd.read_csv(a.zsys)[["ID", "z_sys_line", "z_sys_snr"]]
     zs["ID"] = zs["ID"].astype(int)
+    # lya_catalog.csv may already carry z_sys_line / z_sys_snr. Take them
+    # from the zsys file so the merge does not suffix them (_x, _y).
+    cat = cat.drop(columns=[c for c in zs.columns if c != "ID" and c in cat.columns])
     cat = cat.merge(zs, on="ID", how="left")
     if a.ids:
         miss = sorted(set(a.ids) - set(cat["ID"]))

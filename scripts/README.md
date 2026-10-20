@@ -11,15 +11,19 @@ All data paths are under `/ceph/cephfs/apatrick/P2`. Each script prints the full
 
 ## Rebuild in progress (October 2026)
 
-The pipeline is being rewritten step by step to start from Isaac's PRIMER + MINERVA catalogue. Every source is now keyed on Isaac's catalogue `Number` (the `ID` column), not the JELS ID. Sections A to D below are rewritten (sample, z_sys, MUSE Lyα, detection thresholds, the Lyα catalogue and the Lyα against systemic figures), as are steps 22, 23 (M_UV and β) and 26 (science plots). Step 14b (double-peak fit) is new. Steps 18 to 21, 21b, 24, 27 and 28 still describe the old JELS-ID version and will be updated as each is redone. Step 25 has moved to 17d.
+The pipeline is being rewritten step by step to start from Isaac's PRIMER + MINERVA catalogue. Every source is now keyed on Isaac's catalogue `Number` (the `ID` column), not the JELS ID. Sections A to D below are rewritten (sample, z_sys, MUSE Lyα, detection thresholds, the Lyα catalogue and the Lyα against systemic figures), as are steps 22, 23 (M_UV and β) and 26 (science plots). Steps 14b (double-peak fit), 14c (f_blue), 23b (SED properties), 24b (f_esc) and 24c (Hα checks) are new, step 24 (Hα) is rewritten, and step 26 makes every science figure. Steps 18 to 21, 21b, 27 and 28 still describe the old JELS-ID version and will be updated as each is redone. Step 25 has moved to 17d.
 
 ## Systemic redshift rule
 
 One rule is used everywhere, defined once in `p2_common.py` (`pick_zsys`).
 
-1. [OIII] if it is detected, A/noise ≥ 5
-2. otherwise Hα if detected, A/noise ≥ 5
-3. otherwise no z_sys, and the source leaves the z_sys sample
+1. [OIII] inside its grating's nominal range, A/noise ≥ 5
+2. otherwise Hα inside its grating's nominal range, A/noise ≥ 5
+3. otherwise [OIII] outside the nominal range, A/noise ≥ 5
+4. otherwise Hα outside the nominal range, A/noise ≥ 5
+5. otherwise no z_sys, and the source leaves the z_sys sample
+
+The nominal ranges (`pc.NIRSPEC_NOMINAL_UM`, JDox) are G235M 1.66 to 3.07, G235H 1.66 to 3.05, G395M 2.87 to 5.10 and G395H 2.87 to 5.14 µm. The DJA spectra run past them, but there the calibration is less certain and above about 3.4 µm in G235 second-order light contaminates. 18264 had [OIII] at 3.27 µm in G235M 139 km/s from its Hα inside G395M, and Hα fluxes past the range disagreed with G395 by factors of 0.6 to 3.2, so a line inside the range is always preferred. `z_sys_in_range` is 0 where z_sys still comes from outside it (in October 2026 19338, 51717 and 52330).
 
 A/noise is the fitted line amplitude divided by the flux scatter in the two adjacent continuum bands, the quantity the LiMe paper (Fernández et al. 2024, Sect. 5) uses, and 5 is its detection boundary for lines about as wide as the resolution. A fit counts only if it also has a FWHM of at least 1 pixel (not a single-pixel spike) and a centre error ≤ 2.5 Å. Every fit uses LiMe's adjacent-band continuum, lines in the detector gap are not fitted ([OIII] needs 5007 itself on the spectrum), and Hα's z comes from the Hα + [NII] blend. For each line the grating with the highest A/noise among the passing fits is used. Hβ and [OII] are fitted and kept but not used for z_sys. `build_zsys_catalog.py` takes `--oiii-snr-min` and `--ha-snr-min` to change the thresholds.
 
@@ -64,7 +68,7 @@ python lime_fit_lines.py --ids <ID> --lines OIII --force-single --dry-run
 ```
 
 **5. z_sys** `build_zsys_catalog.py` (env39)
-Writes `jwst_catalogs/systemic_redshifts.csv` (every source, best z per line, z_sys where there is one) and `jwst_catalogs/primer_minerva_in_muse_zsys.csv` (only the sources with a z_sys, with `z_sys`, `z_sys_err`, `z_sys_snr`, `z_sys_line`, `z_sys_grating` and `dv_sys_dja_kms`). Prints why each dropped source has no z_sys.
+Reads the per-grating [OIII] and Hα fits (`lime_<line>_fits.csv`) and takes each line's best successful fit inside and outside its grating's nominal range (rule above). Writes `jwst_catalogs/systemic_redshifts.csv` (every source, best z per line, with `z_<line>_ext` columns for the best fit outside the range, z_sys where there is one) and `jwst_catalogs/primer_minerva_in_muse_zsys.csv` (only the sources with a z_sys, with `z_sys`, `z_sys_err`, `z_sys_snr`, `z_sys_line`, `z_sys_grating`, `z_sys_in_range` and `dv_sys_dja_kms`). Prints why each dropped source has no z_sys, the sources whose z_sys is outside the range, and every source whose z_sys changed since the last run, with the shift in km/s. Those need the MUSE steps rerun with `--ids`.
 ```bash
 python build_zsys_catalog.py --dry-run
 python build_zsys_catalog.py
@@ -141,11 +145,24 @@ The MC errors are built in, so there is no separate MC step or merge. Each sourc
 Writes `MUSE_catalogs/lya_double_fits.csv` (dv_blue, dv_red, peak_sep, flux_blue, flux_red, flux_total, blue_red_ratio, the red peak's z_lya_red, wavelength and centre precision, the intrinsic FWHM of each peak and the observed FWHM of the red one, each with an MC error, whether the red peak is resolved, the seven fit parameters, χ² and BIC of both models, dbic, double_peak, double_reason) and `MUSE_subcubes/<ID>/<ID>_lya_double_fit.png`, laid out as `<ID>_lya_fit.png` with the same ±150 Å range and 2-pixel display bins (`--plot-halfwidth`, `--plot-bin`): the spectrum with the single skewed Gaussian dashed grey, the double fit in red, the blue Gaussian and red skewed peak dotted with their peaks marked, systemic in orange and a velocity axis on top, the S/N, Δv_blue, Δv_red and peak separation in the corner (ΔBIC, B/R and the preferred model are in the CSV and the PDF captions), and the pseudo-NB on the right. The CSV has the double-fit values for every fitted source. The catalogue (17b) then picks the preferred fit for each source. `--plots-only` redraws the figures from the parameters saved in the CSV in about a minute, without refitting or changing the CSV, e.g. with `--plot-halfwidth 60` to zoom in on the peaks.
 ```bash
 python fit_lya_double_peak.py --ids 26917 59658          # quick look, replaces these rows
-sbatch slurm/run_fit_lya_double_peak.slurm                # all sources, 500 MC refits
+sbatch slurm/run_fit_lya_double_peaks.slurm               # all sources, 500 MC refits
 python fit_lya_double_peak.py                            # or interactively, 200 refits
 python fit_lya_double_peak.py --n-mc 50 --no-plots      # fast, CSV only
 python fit_lya_double_peak.py --plots-only               # redraw the figures only, ±150 Å
 python fit_lya_double_peak.py --plots-only --plot-halfwidth 60 --ids 31364   # zoomed in
+```
+
+**14c. Blue flux fraction** `measure_lya_shape.py` (new)
+f_blue = F(v < 0) / F(−1000 < v < +1000 km/s), the fraction of the Lyα flux blueward of systemic, for every source with a Lyα fit (`--vmin`, `--vmax` set the window). A purely red line gives 0 and a line symmetric about systemic 0.5. It is the v < 0 fraction of Trainor et al. (2015), and the blue/red ratios of Erb et al. (2014) and Hayes et al. (2021) convert as R/(1 + R). It always uses the catalogue's `lya_model`. Both scripts take it from `pc.preferred_lya_model` with the same inputs (z_lya in `lya_fits_mc.csv` and double_peak in `lya_double_fits.csv`), so the double fit where double_peak = 1 and the single skewed Gaussian otherwise. There is no fallback, so a source whose preferred model has missing parameters gets no f_blue (`shape_status` no_double_params or no_fit_params). Rerun it after 14 and 14b. Three versions are measured.
+- `f_blue_int`, from the model before the LSF. Not smeared by the MUSE resolution, but for a single skewed Gaussian it is set mostly by the model shape (α ≥ 0 puts the tail on the red side), so singles come out near 0.
+- `f_blue_conv`, the same model with the LSF, to compare like for like with the data.
+- `f_blue_data`, the flux summed either side of systemic in the aperture spectrum, with fractional pixels at the ends. Model independent, but smeared by the LSF, so lines near systemic gain blue flux from the instrument alone.
+
+`f_blue_int_single` keeps the skewed-Gaussian value for every source. The model fractions are exact, from the skew-normal and Gaussian cumulative distributions. Errors come from `--n-mc` (200) draws, each with z_sys drawn from its error (so the dividing line moves) and either a refit of the preferred model to the best-fit model plus noise (same pixels and limits as 13 and 14b) or the spectrum plus noise for the data version. Each value has `_err_lo` and `_err_hi` (to the 16th and 84th percentiles) and `_err` (their mean). On synthetic spectra the model values match the input exactly and the data version is unbiased, with a scatter of about 0.02 to 0.05 at Σ ≈ 10. Writes `MUSE_catalogs/lya_shape.csv` and `MUSE_subcubes/<ID>/<ID>_lya_fblue.png` (the line in velocity with the blue side shaded, data, model with and without the LSF, and the three values). About 15 s for six sources at 200 draws, so a few minutes for the sample, no slurm needed. Then rerun 17b.
+```bash
+python measure_lya_shape.py
+python measure_lya_shape.py --ids 31364 26917       # replaces only these rows
+python measure_lya_shape.py --n-mc 50 --no-plots    # quick
 ```
 
 ### D. Detections (rewritten for Isaac IDs)
@@ -200,9 +217,15 @@ One row per z_sys source. `lya_model` says which fit is preferred, single (the s
 | `dbic_double`, `double_reason` | the BIC difference for every source 14b ran on, and why the single fit was kept |
 | dv_blue, peak_sep, blue_red_ratio, flux_blue, flux_red, fwhm_blue_kms (+ _err) | only where lya_model is double, blank otherwise |
 | delta_v_single (+ _err) | the skewed-Gaussian Δv for every source, to see how much the choice moves it |
+| f_blue_int, f_blue_conv, f_blue_data (each + _err_lo, _err_hi, _err), f_blue_int_single (+ _err) | blue flux fraction (step 14c) |
+| z_sys_line | [OIII] or Hα, the line that set z_sys |
+| ha_fwhm_int_kms (+ _err), ha_fwhm_obs_kms, ha_fwhm_unresolved, ha_fwhm_grating | best Hα FWHM from `jwst_catalogs/lime_Ha_summary.csv` (step 4), the _int value corrected for the NIRSpec resolution |
 | muv_fit, muv_fit_err, beta_fit, beta_fit_err, beta_fit_good, f1500_fit, f1500_fit_err | photometric UV fit (step 22) |
+| fesc_lya, fesc_lya_err_lo, fesc_lya_err_hi, fesc_lya_err, fesc_lya_is_limit, fesc_status, fesc_lya_sed (+ errs), lya_flux_lim_5sig | Lyα escape fraction (24b), blank if made under another rule |
+| ha_case, ha_source, dust_method, balmer_spectra, a_ha (+ errs), ha_flux_corr (+ errs) | how Hα was measured and dust corrected (24) |
+| sed_ok, sed_zred_ok, sed_\<q\> with _err_lo, _err_hi, _err | Ken's SED fits (step 23b), q = muv, logM, logsfr10, logsfr100, logssfr10, logssfr100, av, aha, logxion. Blank where sed_ok is 0 |
 
-Without `lya_double_fits.csv` every source is single and it says so. The extra detection cuts use the errors of the preferred fit.
+Without `lya_double_fits.csv` every source is single and it says so. Without `jwst_catalogs/sed_properties.csv` the SED columns are blank and it says so. The same holds for `MUSE_catalogs/lya_shape.csv` (f_blue) and `lime_Ha_summary.csv`, and any source whose f_blue was measured with a different model from its `lya_model` (a stale `lya_shape.csv`) gets blank f_blue columns and is listed, so another model's value never reaches the catalogue. Rerun 14c, then 17b. It prints how many sources have a usable SED and lists any whose SED fit was made at a redshift far from z_sys. The extra detection cuts use the errors of the preferred fit.
 
 It prints the S/N threshold with its percentile, how many sources pass it and the counts for the percentiles, and, for the sources above the S/N threshold, the median, robust σ (1.4826 × MAD) and median + 3σ of both `delta_v_err` and `lya_centre_err`, whichever rule is used, to help choose a fixed extra cut. With an extra cut it lists the sources that fail it. no_err means a fit with no MC error, which counts as a non-detection until the MC is rerun.
 
@@ -213,7 +236,7 @@ python build_lya_catalog.py --det-percentile 95                                #
 python build_lya_catalog.py --extra-cut dv_err --dv-err-max 100                # snr5_dverr100
 python build_lya_catalog.py --det-percentile 98 --extra-cut centre_err --centre-err-max 60
 ```
-Rerun it after step 22 so the UV columns are filled, and after any MC rerun. Then rerun 17c, 17d `--pdf-only`, 26 and 26b for that rule. To remake the outputs of an older rule without rebuilding, give those scripts `--catalog /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_catalog_<tag>.csv`.
+Rerun it after steps 14c, 22 and 23b so the f_blue, UV and SED columns are filled, and after any MC rerun. Then rerun 17c, 17d `--pdf-only`, 26 and 26b for that rule. To remake the outputs of an older rule without rebuilding, give those scripts `--catalog /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_catalog_<tag>.csv`.
 
 **17c. Lyα fits by eye** `make_lya_fit_pdfs.py`
 Three PDFs showing each source's preferred fit, the `_lya_fit.png` figure (spectrum, skewed Gaussian, detection window and pseudo-NB) for a single and the `_lya_double_fit.png` figure for a double. Four per page sorted by S/N, each captioned with Σ, z_sys, the model and its ΔBIC, Δv (Δv_red for a double) with its error and the Lyα centre error, the blue peak and B/R for a double, the detection state (with the reason for a non-detection) and any fit flag. The first page gives the rule and lists the sources. Writes `plots/lya_fit_pdfs/lya_fits_<tag>_detections.pdf`, `lya_fits_<tag>_non_detections.pdf` (both `in_analysis == 1`) and `lya_fits_<tag>_close_pairs.pdf` (every `close_pair` source, with its group number). Interlopers and untested sources are in none. `--figure single` or `--figure double` shows that figure for every source instead, in `lya_single_fits_<tag>_<set>.pdf` or `lya_double_fits_<tag>_<set>.pdf`, to compare the two fits side by side. Needs 17b first.
@@ -281,14 +304,72 @@ Three panels in `plots/muv_beta_diagnostics.png`: β against z_sys (coloured by 
 python muv_beta_diagnostics.py
 ```
 
-**24. Hα and Hβ corrections** `build_ha_flux_corrections.py`
-Slit-loss correction of the NIRSpec line fluxes to the PRIMER + MINERVA total photometry, then the Balmer-decrement dust correction. Writes `jwst_catalogs/ha_hb_flux_corrections.csv` and `_values.csv`. The method is described at the top of the script.
+**23b. SED properties** `build_sed_catalog.py` (new)
+Reads Ken's BAGPIPES fits of the z_sys sample, `jwst_catalogs/primer_minerva_full_in_muse_with_grating_zsys_ceridwen_output.fits`, keyed on Isaac's `Number` and fitted at a fixed redshift (`zred_fixed`). The fits are assumed to use total fluxes, like muv_fit, so no aperture correction is applied (to confirm with Ken). Four checks are printed. Every Number appears once and the IDs match the z_sys sample, with any missing on either side listed. RA/Dec agree with the sample to 0.1″ (`--pos-tol`). `zred_fixed` is within 100 km/s of the current z_sys (`--dz-tol-kms`), otherwise `sed_zred_ok` = 0, which catches a fit made at an old redshift. Every p16 ≤ p50 ≤ p84 is finite, otherwise `sed_ok` = 0 and `build_lya_catalog.py` blanks that source's SED values. Each quantity q gets `sed_<q>` (p50), `sed_<q>_err_lo` (p50 − p16), `sed_<q>_err_hi` (p84 − p50) and `sed_<q>_err` (their mean).
+
+| Column | Ken's column | |
+|---|---|---|
+| sed_muv | MUV | AB mag. err_lo is towards brighter |
+| sed_logM | log10_mass_surviving | log M*/M☉ |
+| sed_logsfr10, sed_logsfr100 | log10_sfr10, log10_sfr100 | log M☉/yr, 10 and 100 Myr |
+| sed_logssfr10, sed_logssfr100 | log10_ssfr10_surviving, log10_ssfr100_surviving | log /yr |
+| sed_av, sed_aha | A_V, A_Ha | mag |
+| sed_logxion | log10_xion | log ξ_ion |
+| sed_zred, dv_sed_zsys_kms, sed_zred_ok, sed_ok, sed_log_evidence, sed_log_likelihood | | checks and fit quality |
+
+The 10 Myr SFR and sSFR are often poorly constrained, since they depend on a recent burst the photometry barely sees, so bin by the 100 Myr values. The script also prints the sample medians and how many sources have SFR errors above 0.5 dex. It plots sed_muv against the interim muv_fit with the 1:1 line, and their difference against z_sys (open points have muv_fit_err ≥ 0.5), and prints the median offset, the robust scatter and any source more than 0.5 mag apart (`--muv-flag`). Writes `jwst_catalogs/sed_properties.csv` and `plots/sed_muv_comparison.png`. Then rerun 17b and 26.
 ```bash
-python build_ha_flux_corrections.py --download-filters   # once, gets the medium-band filter curves
+python build_sed_catalog.py --dry-run    # checks only, nothing written
+python build_sed_catalog.py
+python build_lya_catalog.py
+python plot_lya_science.py
+```
+
+**24. Corrected Hα** `build_ha_flux_corrections.py` (rewritten for Isaac IDs)
+The total, dust-corrected Hα flux of every z_sys source, F_Hα,corr = F_Hα,total × 10^(0.4 A_Hα). Each source falls in one case, recorded in `ha_case`.
+
+| ha_case | ha_source | dust_method | Hα | A_Hα |
+|---|---|---|---|---|
+| 1 | spec | balmer | NIRSpec Hα × slit factor S | Balmer decrement |
+| 2 | spec | sed | NIRSpec Hα × slit factor S | Ken's SED A_Hα (no usable Hβ) |
+| 3 | phot | sed | excess in the band containing Hα (already total) | Ken's SED A_Hα |
+| 0 | none | none | no Hα, or no A_Hα (`ha_reason` says why) | |
+
+Hβ is only used in the decrement, never in place of Hα. A line counts at flux S/N ≥ 3 (`--ha-snr-min`, `--hb-snr-min`), and only inside the grating's nominal range (G235M 1.66 to 3.07, G235H 1.66 to 3.05, G395M 2.87 to 5.10, G395H 2.87 to 5.14 µm). The DJA spectra continue beyond these limits, but the flux there is poorly calibrated and contaminated by second-order light. In the first run 11 G235M Hα fluxes at 3.1 to 4.5 µm gave Balmer decrements with a median of 5.2, against 3.6 inside the range (`--allow-extended` keeps them). The excluded fits are listed.
+- **Slit factor.** S = f_ν(Isaac total photometry) / f_ν(synthetic, spectrum through the same band), in a band with transmission ≥ half its peak at the line, the line on the spectrum, ≥ 70 per cent of the band covered and both fluxes at S/N ≥ 3. Medium bands first. A direct factor outside 0.5 to 5 (`--slit-range`) is not believed (below 0.5 the spectrum holds twice the galaxy's total light, e.g. 55001 gave 0.01 and f_esc 23). Those, sources with photometry Flag 1, 2 or 3, and sources with no passing band get the sample median with its NMAD (`ha_slit_source` direct or sample_median, `ha_slit_note` says why, with any rejected value). For each line a spectrum with a direct factor is chosen first, then the highest S/N.
+- **Balmer decrement.** `balmer_spectra` same where one spectrum has both lines (the observed ratio, as the slit loss largely cancels, `--balmer-basis slitcorr` corrects both first), different where they are in different spectra (each slit-corrected first). E(B−V) = 2.5/(k_Hβ − k_Hα) log10(R/2.86), A_Hα = k_Hα E(B−V), 0 below 2.86, Calzetti k_Hα = 3.33, k_Hβ = 4.60.
+- **Photometric Hα.** F_Hα = Δf_ν c ∫T/λ dλ / Σ r_i T(λ_i) λ_i, with Δf_ν the band flux minus a power-law continuum through the nearest band on each side free of strong lines, and the sum over Hα, [NII] at the sample median [NII]/Hα and optional [SII] (`--sii-ha`, default 0). Computed for every source, so it is also checked against the spectral Hα.
+- **Errors.** 5000 Monte Carlo draws of every input (line fluxes, slit factors, photometry, the SED A_Hα as a split normal), with the decrement redone in each draw. The draws of `ha_flux_corr` and `ha_flux_corr_sed` are saved for step 24b.
+- `ha_flux_corr_sed` is every source's Hα corrected with the SED A_Hα whatever its case, to test the dust method.
+
+It prints the cases (all, in the analysis, Lyα detections), the Lyα detections with no Hα and why, slit factors above 3 or below 0.7, the median slit factor per grating, the same-spectrum decrement observed against slit-corrected, A_Hα Balmer against SED, photometric against spectral Hα per band, and the case 3 sources. Writes `jwst_catalogs/ha_flux_corrections.csv`, `jwst_catalogs/ha_flux_corrections_mc.npz` and `plots/ha_flux_corrections.png` (slit factors, A_Hα Balmer against SED, photometric/spectral Hα, A_Hα used against z by case). Needs the NIRCam filter curves in `jwst_catalogs/nircam_filters/` (`--download-filters` once) and `sed_properties.csv` (23b). On synthetic galaxies with a known intrinsic Hα and a 40 per cent shutter, all three cases recovered the intrinsic Hα within 4 per cent.
+```bash
+python build_ha_flux_corrections.py --download-filters    # only if the curves are missing
 python build_ha_flux_corrections.py
-python build_ha_flux_corrections.py --phot aperture \
-  --out /ceph/cephfs/apatrick/P2/jwst_catalogs/ha_hb_flux_corrections_aper.csv
-python build_ha_flux_corrections.py --slit-mode dja    # DJA path loss only, no photometric correction
+python build_ha_flux_corrections.py --balmer-basis slitcorr
+```
+
+**24b. Lyα escape fractions** `measure_lya_fesc.py` (new)
+f_esc = F_Lyα / (8.7 F_Hα,corr) (Paper 1 Eq. 7), with F_Lyα the observed `lya_flux` (0.6″ aperture, not dust-corrected) and F_Hα,corr from step 24. For Lyα non-detections a 5σ upper limit, F_lim = 5 σ_rms √N_pix Δλ (Paper 1 Eq. 6), in a window the median observed FWHM of the detections wide, centred on Lyα at z_sys shifted by the median detected Δv (`--ul-centre systemic` to centre on systemic). Errors from 5000 draws, F_Lyα from its error and F_Hα,corr from the saved draws of step 24. `fesc_lya_sed` uses the SED A_Hα for every source. It prints the status counts, every detection with its case, A_Hα and both f_esc, the median per case, f_esc Balmer/SED for case 1, the range of the limits and the reverse Kaplan-Meier sample median (lifelines, bootstrap errors) overall, with SED dust throughout and per case. Writes `MUSE_catalogs/lya_fesc.csv` and `plots/lya_fesc.png` (f_esc against z and M_UV, symbols by case, limits open). Then rerun 17b, which joins f_esc and the Hα flags, and blanks f_esc if `lya_fesc.csv` was made under another detection rule.
+```bash
+python build_lya_catalog.py          # so lya_flux and lya_det are current
+python build_ha_flux_corrections.py
+python measure_lya_fesc.py
+python build_lya_catalog.py          # joins fesc_lya and the flags
+```
+
+**24c. Check the Hα corrections** `checks/check_ha_corrections.py` (new)
+Changes no values. For `in_analysis == 1` (`--sample all` or `detections`), Lyα detections filled and non-detections open. It recomputes the slit factor S in every NIRCam band each spectrum covers, not only the band used, and writes them to `jwst_catalogs/ha_slit_factors_all_bands.csv` (`--reuse-bands` reads it back instead of reopening the spectra). Bands outside the grating's nominal range are shown but left out of every number. Four figures in `plots/ha_checks/`.
+- `slit_factors.png`: S against wavelength per spectrum, G395 against G235 at a common 3 µm (each band moved with the median slope), max/min S within a spectrum, S_Hα used against Isaac's `total_correction` and against z, and S_Hβ against S_Hα in one spectrum.
+- `balmer_dust.png`: A_Hα Balmer against SED (colour Hβ S/N), the decrement against z, S_Hα/S_Hβ for the same-spectrum decrements, the Balmer minus SED offset against Hβ S/N and stellar mass, and A_Hα used by case.
+- `ha_phot_vs_spec.png`: photometric against slit-corrected spectral Hα, and their ratio against S, z and photometric S/N.
+- `fesc_checks.png`: f_esc Balmer against SED for case 1, f_esc against S and against A_Hα, and f_esc by case.
+
+It prints the case counts, median S per grating, the median slope d ln S / d ln λ and the A_Hα error it puts on a same-spectrum observed decrement, the G395/G235 ratio, the Balmer minus SED offset, the photometric/spectral ratio, and every flagged source. Flags (`jwst_catalogs/ha_correction_flags.csv`): `slit_out` (direct S_Hα outside `--slit-warn` 0.8 to 3), `slit_median`, `grating` (G395/G235 S differ by more than `--ratio-warn` 1.5), `chromatic` (max/min S in one spectrum above 1.5), `balmer_low` (below 2.86 by > 2σ), `dust_offset` (|Balmer − SED| > 0.5 mag and > 3σ), `phot_spec` (outside `--phot-warn` 0.5 to 2), `fesc_gt1` and `fesc_dust` (Balmer/SED f_esc outside 1/3 to 3).
+```bash
+python checks/check_ha_corrections.py
+python checks/check_ha_corrections.py --sample all
+python checks/check_ha_corrections.py --reuse-bands
 ```
 
 ### G. Figures
@@ -296,11 +377,30 @@ python build_ha_flux_corrections.py --slit-mode dja    # DJA path loss only, no 
 **25. Lyα against the systemic line, per source**
 Moved to step 17d.
 
-**26. Science plots** `plot_lya_science.py` (rewritten for Isaac IDs)
-The same plots as before (histograms of FWHM, Δv, z and M_UV, Δv against FWHM with Verhamme+18, the FWHM model comparison with Prieto-Lyon+25, Mason+18 and Mason+19, Δv and FWHM against M_UV, each also split by redshift and M_UV) for the detections and for the non-detections (`lya_det` 1 or 0), using only `in_analysis == 1`, so close pairs and interlopers are left out and 50803 and 51988 are kept. Untested sources (65863) are in neither set. M_UV is muv_fit where muv_fit_err < 0.5. Reads only `MUSE_catalogs/lya_catalog.csv`, so Δv and FWHM are those of the preferred fit, the red peak for a double. Writes `plots/lya_science/<tag>_<detections|non_detections>_<plot>.png`, e.g. `snr5_detections_dv_vs_fwhm.png`, 25 per set, where `<tag>` is the catalogue's detection rule. `--fwhm-kind obs` adds an `obs_` tag. `--catalog` points at a kept `lya_catalog_<tag>.csv` to remake an older rule's plots.
+**26. Science plots** `plot_lya_science.py` (rewritten, every figure)
+Makes every science figure with a physical reason to exist, plus histograms of every property, so the paper figures can be chosen afterwards. Detections by default (`--sets detections non_detections` adds the other set), `in_analysis == 1` only. Reads only `MUSE_catalogs/lya_catalog.csv`, so Δv, FWHM and f_blue are those of the preferred fit (the red peak for a double). M_UV is `sed_muv` (step 23b) by default and the galaxy properties are Ken's SED values, all with asymmetric errors (`--muv-source fit` uses the interim muv_fit, names gain `muvfit_`).
+
+Writes one folder per rule and set, `plots/lya_science/<rule>_<set>/` (e.g. `plots/lya_science/snr5_detections/`), with one PNG per figure named `<section>_<plot>[_<split>].png`, `stats.csv` and `all_figures.pdf` (every figure, one per page, to browse). `plots/lya_science/<rule>_det_vs_nondet/` holds the comparisons of the two sets. Reruns overwrite.
+
+| Section | Figures | Physics and predictions |
+|---|---|---|
+| `hist_` | every property, plus `hist_overview.png`. FWHM, Δv and f_blue_int also by z | distributions |
+| `sys_` | `dv_vs_fwhm`, `dv_vs_fwhm_verhamme` (with a linear fit), `verhamme_resid` (histogram, and against z and M_UV), `dvred_vs_halfsep` and `recovery_doubles` (doubles) | can the profile recover z_sys? Verhamme et al. (2018) Eq. 2 and the midpoint of the peaks |
+| `rt_` | `fblue_<kind>_vs_dv`, `br_vs_sep`, `br_vs_dvred`, `sep_vs_z`, `fwhm_vs_ha_fwhm`, `dv_vs_ha_fwhm` | radiative transfer. Low N_HI gives small Δv and blue flux (Verhamme et al. 2015, CLASSY), separation as the LyC indicator (Izotov et al. 2018), RT broadening beyond the nebular width (Erb et al. 2014) |
+| `igm_` | `dv_vs_z`, `fblue_<kind>_vs_z`, `double_frac_vs_z` (at ΔBIC > 2, 6 and 10, Wilson 68% intervals, a lower limit), `fwhm_vs_z` (with (1+z)^(2/3) and a fitted power-law index) | the IGM and redshift (Hayes et al. 2021, zELDA, Prieto-Lyon et al. 2025) |
+| `gal_` | `dv_vs_muv` (Mason+18, with a fit of log Δv), `fwhm_vs_muv` (Mason+19, Prieto-Lyon+25), `fblue_int_vs_muv`, `fwhm_models[_split]` (as before), and dv, fwhm and fblue_int against M*, SFR100, sSFR100, A_V and ξ_ion | halo mass, feedback, dust and the ionising spectrum |
+| `chk_` | `dv_by_zline`, `dv_by_grating`, `dv_single_vs_double`, `dv_vs_snr`, `fwhm_vs_snr`, `fblue_int_vs_data`, and in `det_vs_nondet` `flux_vs_z`, `snr_vs_z` and `det_vs_nondet_cdfs` | systematics and selection |
+
+Splits, as suffixes. `zbins` (three z bins at `--z-edges` 3.5 4.5), `zbins2` (at `--z-split` 3.5), `muvbins`, `massbins`, `ssfrbins` and `avbins` (two bins at the set's median), and `model` (single against double). Only the splits that make sense for a figure are made, and `--bins` limits them. Each scatter panel shows Spearman ρ and p. `stats.csv` has one row per panel with N, Spearman ρ and p, the 16th to 84th percentile of ρ over `--n-stat-mc` (1000) redraws within the errors, Kendall τ and p, the partial ρ controlling for z_sys (where neither axis or split is z), the fit slope and intercept with bootstrap errors where a fit is drawn, and for the histogram, fraction and comparison figures their medians, fractions and KS, Kruskal-Wallis or Anderson-Darling p (SciPy caps the AD p between 0.001 and 0.25). The terminal lists every unbinned panel with p < 0.05. Fits allow for errors on both axes and leave out unresolved lines, which enter the correlations at their FWHM limit.
+
+f_blue figures are made for each of `--fblue-kinds` (int and data). The data version falls with Δv from the LSF alone, so use int for the physics and data as a check. `--fwhm-kind obs` uses the observed widths (names gain `obs_`), the closer comparison for Verhamme+18. About two minutes per set, mostly writing the figures.
 ```bash
-python plot_lya_science.py
-python plot_lya_science.py --sets detections
+python plot_lya_science.py                                       # detections
+python plot_lya_science.py --sets detections non_detections
+python plot_lya_science.py --bins zbins2 model --no-pdf          # fewer figures, quicker
+python plot_lya_science.py --fwhm-kind obs
+python plot_lya_science.py --muv-source fit                      # interim M_UV, muvfit_ names
+python plot_lya_science.py --catalog /ceph/cephfs/apatrick/P2/MUSE_catalogs/lya_catalog_p95.csv
 ```
 
 **26b. Check the Lyα widths** `checks/check_lya_fwhm.py`
@@ -335,16 +435,18 @@ When an input changes, these are the steps downstream of it. Steps marked * can 
 | a systemic line fit (4*, 5) | 6, 7, then for the sources whose z_sys moved 9*, 10, 11*, 12*, 13*, 14*, then 18 to 22, 24, 28 |
 | the source list | 1 to 3, then everything |
 | continuum subtraction settings | 9 to 14, 15 to 17 if the good sample is affected, then 18 to 21, 28 |
-| a Lyα fit setting | 13, 14, 14b, 17b, 17c, 18 to 21, 28 |
-| a double-peak setting (14b) | 14b, 17b, 17c, 17d for the double sources, 26 |
+| a Lyα fit setting | 13, 14, 14b, 14c, 17b, 17c, 26, 28 |
+| a double-peak setting (14b) | 14b, 14c, 17b, 17c, 17d for the double sources, 26 |
+| the f_blue window (14c) | 14c, 17b, 26 |
 | a by-eye label | edit `lya_manual_labels.csv`, then 21, 28 |
 | photometry catalogue | 22, 23, 17b, 26, then 24, 27, 28 |
-| Hα method | 24, 27, 28 |
+| Hα method, or the Lyα fits or detection rule | 24, 24b, 17b, then 24c, 26, 27, 28 |
 | SED or fesc outputs | 28 |
 | the close-pair list (step 1) or `CLOSE_PAIR_KEEP` | 17b, 17c, 17d `--pdf-only`, then anything that reads `lya_catalog.csv` |
 | the detection rule (17b options) | 17b, 17c, 17d `--pdf-only`, 26, 26b |
 | an MC error (14*) | 17b, then as for the detection rule |
-| M_UV or β (22) | 23, 17b, 26 |
+| M_UV or β (22) | 23, 23b (comparison plot), 17b, 26 |
+| Ken's SED fits (23b) | 23b, 17b, 26 |
 
 Step 7 lists the sources whose z_sys changed. The master also carries `zsys_mismatch_kms`, the difference between the z the MUSE products were made with and the current one.
 
@@ -372,7 +474,7 @@ sample, zsys, Lyα detection, Lyα fit, Δv, tier, manual labels, UV, Hα/Hβ fl
 
 **New files**
 
-- `p2_common.py` holds the z_sys rule, the shared constants and the fallback grating used for z_dja.
+- `p2_common.py` holds the z_sys rule, the shared constants and the fallback grating used for z_dja, and `preferred_lya_model`, the one rule for which Lyα fit is preferred (used by 14c and 17b).
 - `build_master_catalog.py` builds the master catalogue.
 - `update_manual_labels.py` creates and extends the label file.
 - `README.md` is this file.
@@ -405,7 +507,7 @@ sample, zsys, Lyα detection, Lyα fit, Δv, tier, manual labels, UV, Hα/Hβ fl
 
 - `jwst_catalogs/OIII_results_by_JELS_ID_2.csv` and `OIII_summary_by_JELS_ID_2.csv` differ from the main files only for 49939 G235H, by 15 km/s. Nothing reads them.
 - `MUSE_catalogs/lya_properties_a30.csv`, `lya_properties_grouped.csv`, `lya_sample_tiered.csv` and `mc_partials_preLSF/` are earlier versions.
-- `jwst_catalogs/ha_hb_flux_corrections_2as*.csv` can go once the Hα rewrite is in.
+- `jwst_catalogs/ha_hb_flux_corrections*.csv` (all versions) and `jwst_catalogs/ha_hb_diagnostics.csv` are replaced by `ha_flux_corrections.csv` (step 24).
 - `jwst_catalogs/audit_missing_OIII.csv` and `duplicate_sources.csv` are one-off check outputs.
 - The extra columns other scripts wrote into `grating_sources_by_JELS_ID.csv` (peak_snr, over_98, over_99.5, OIII_filter, z_OIII_*) vanish the next time step 3 runs. Nothing reads them now.
 
@@ -418,26 +520,17 @@ sample, zsys, Lyα detection, Lyα fit, Δv, tier, manual labels, UV, Hα/Hβ fl
 - Port `--force-double`, `--cont-side` and `--mask` into `lime_OIII_singlereview.py`.
 - AO gap flag and the edge false-position rejection.
 
-**Hα corrections** (`build_ha_flux_corrections.py`)
+**Hα corrections and f_esc** (steps 24 and 24b, done)
 
-- Add the SED dust fallback (A_V from Ken's fits scaled to Hα) for sources without a usable Hβ.
-- Check the size of the corrections with the new total photometry. With the old 0.6 arcsec photometry the median total was ×4.4 and the largest ×46.
-- Decide how to match the Lyα aperture. The Hα is now corrected to total, but the Lyα flux is a 0.6 arcsec MUSE aperture flux, so fesc needs either a total Lyα flux or an aperture Hα.
+- Ask Ken how `A_Ha` is defined in his fits (whether nebular lines get extra attenuation). The decrement gives a median 0.29 mag more.
+- The Lyα flux is a 0.6″ aperture flux and Hα is total, as in Paper 1, so f_esc measures the central Lyα.
+- Stacked-flux f_esc, once the stacks are rewritten.
 
 **Stacking** (`stack_lya_systematic.py`)
 
 - Fix the per-pixel clipping (clip whole sources instead) and measure B/R against a local baseline, once the choices on the decision list are agreed.
 
-**SED inputs** (new script)
+**SED inputs** (`build_sed_catalog.py`, step 23b, done)
 
-- Read Ken's BAGPIPES fits (run on the PRIMER + MINERVA catalogue) and match on JELS ID, through `primer_minerva_by_JELS_ID.csv` if they are keyed on the catalogue Number.
-- Correct M* and SFR to total with `pm_total_correction` if the fits used aperture fluxes.
-- Write `sed_logM`, `sed_sfr10`, `sed_ssfr10`, `sed_av`, `sed_ebv` and their errors, the names the master already expects.
-- Those fits used photometric redshift priors. Check whether any sources need refitting at z_sys.
-
-**Lyα escape fractions** (new script)
-
-- fesc = F_Lyα / (8.7 F_Hα,corr) per source (Paper 1, Eq. 7).
-- Detections at the 98 or 99.5 per cent threshold, 5σ upper limits for non-detections.
-- Sample median with reverse Kaplan-Meier (lifelines) and bootstrap errors, plus the stacked-flux fesc, as in Paper 1 Section 5.2.
-- Write `fesc_lya`, its errors, `fesc_lya_is_limit` and `fesc_ha_dust` for the master.
+- Confirm with Ken that the fits used total fluxes. If they used aperture fluxes, M* and SFR need scaling to total (M_UV too).
+- Bin the science plots by M*, SFR100, sSFR100 and A_V (to be planned).

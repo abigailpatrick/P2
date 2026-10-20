@@ -90,6 +90,29 @@ Columns
                         compare with delta_v where the double was preferred
   muv_fit, muv_fit_err, beta_fit, beta_fit_err, beta_fit_good,
   f1500_fit, f1500_fit_err   photometric UV fit (fit_muv_beta.py)
+  f_blue_int, f_blue_conv, f_blue_data (each + _err_lo, _err_hi, _err),
+  f_blue_int_single (+ _err)   fraction of the Lya flux blueward of systemic
+                 (measure_lya_shape.py), from the preferred model before and
+                 after the LSF and from the spectrum
+  z_sys_line     [OIII] or Ha, the line that set z_sys
+  ha_fwhm_int_kms (+ _err), ha_fwhm_obs_kms, ha_fwhm_unresolved, ha_fwhm_grating
+                 the best Halpha FWHM from lime_Ha_summary.csv (lime_fit_lines.py),
+                 corrected for the NIRSpec resolution in the _int column
+  fesc_lya, fesc_lya_err_lo, fesc_lya_err_hi, fesc_lya_err, fesc_lya_is_limit,
+  fesc_status, fesc_lya_sed (+ _err_lo, _err_hi), lya_flux_lim_5sig
+                 Lya escape fraction (measure_lya_fesc.py), 5 sigma upper limit
+                 where fesc_lya_is_limit = 1, and with SED dust throughout.
+                 Blank if lya_fesc.csv was made with another detection rule
+  ha_case, ha_source, dust_method, balmer_spectra, a_ha (+ _err_lo, _err_hi),
+  ha_flux_corr (+ _err_lo, _err_hi)
+                 how Halpha was measured and dust corrected
+                 (build_ha_flux_corrections.py). ha_case 1 spec + Balmer,
+                 2 spec + SED, 3 phot + SED, 0 none. ha_flux_corr in erg/s/cm2
+  sed_ok, sed_zred_ok, and sed_<q> with sed_<q>_err_lo, _err_hi and _err for
+  q in muv, logM, logsfr10, logsfr100, logssfr10, logssfr100, av, aha,
+  logxion        Ken's BAGPIPES fits (build_sed_catalog.py). The posterior
+                 median, p50 - p16, p84 - p50 and their mean. Blank where
+                 sed_ok is 0
 
 Inputs
 ------
@@ -100,6 +123,10 @@ Inputs
   jwst_catalogs/primer_minerva_close_pairs.csv
   jwst_catalogs/muv_beta_fits.csv               UV columns (optional)
   MUSE_catalogs/lya_double_fits.csv             double-peak columns (optional)
+  jwst_catalogs/sed_properties.csv              SED columns (optional)
+  MUSE_catalogs/lya_shape.csv                   f_blue columns (optional)
+  jwst_catalogs/lime_Ha_summary.csv             Halpha FWHM (optional)
+  MUSE_catalogs/lya_fesc.csv                    escape fractions and Halpha flags (optional)
 
 Outputs
 -------
@@ -129,7 +156,16 @@ from check_close_pairs import groups_from_pairs
 CAT = pc.MUSE_CAT_DIR
 CLOSE_PAIRS = f"{pc.P2_ROOT}/jwst_catalogs/primer_minerva_close_pairs.csv"
 MUV_FITS = f"{pc.P2_ROOT}/jwst_catalogs/muv_beta_fits.csv"
-DOUBLE_FITS = f"{pc.MUSE_CAT_DIR}/lya_double_fits.csv"
+DOUBLE_FITS = pc.LYA_DOUBLE_FITS
+SED_PROPS = f"{pc.P2_ROOT}/jwst_catalogs/sed_properties.csv"
+SHAPE_CSV = f"{pc.MUSE_CAT_DIR}/lya_shape.csv"
+HA_SUMMARY = f"{pc.P2_ROOT}/jwst_catalogs/lime_Ha_summary.csv"
+FESC_CSV = f"{pc.MUSE_CAT_DIR}/lya_fesc.csv"
+FESC_COLS = ["fesc_lya", "fesc_lya_err_lo", "fesc_lya_err_hi", "fesc_lya_err", "fesc_lya_is_limit",
+             "fesc_status", "fesc_lya_sed", "fesc_lya_sed_err_lo", "fesc_lya_sed_err_hi",
+             "lya_flux_lim_5sig"]
+HA_FLAG_COLS = ["ha_case", "ha_source", "dust_method", "balmer_spectra", "a_ha", "a_ha_err_lo",
+                "a_ha_err_hi", "ha_flux_corr", "ha_flux_corr_err_lo", "ha_flux_corr_err_hi"]
 # Line quantities measured from whichever model is preferred: the column of
 # lya_fits_mc.csv (single skewed Gaussian) and of lya_double_fits.csv (red
 # peak of the double fit) that fills each catalogue column.
@@ -155,6 +191,17 @@ DOUBLE_ONLY = ["dv_blue", "dv_blue_err", "peak_sep", "peak_sep_err", "blue_red_r
                "fwhm_blue_kms", "fwhm_blue_kms_err"]
 UV_COLS = ["muv_fit", "muv_fit_err", "beta_fit", "beta_fit_err", "beta_fit_good",
            "f1500_fit", "f1500_fit_err"]
+SED_QUANTITIES = ["muv", "logM", "logsfr10", "logsfr100", "logssfr10", "logssfr100",
+                  "av", "aha", "logxion"]
+SED_COLS = ["sed_ok", "sed_zred_ok"] + [
+    f"sed_{q}{s}" for q in SED_QUANTITIES for s in ("", "_err_lo", "_err_hi", "_err")]
+SHAPE_COLS = [f"f_blue_{k}{s}" for k in ("int", "conv", "data")
+              for s in ("", "_err_lo", "_err_hi", "_err")] + ["f_blue_int_single",
+                                                               "f_blue_int_single_err"]
+HA_COLS = {  # catalogue           lime_Ha_summary.csv
+    "ha_fwhm_int_kms": "Ha_fwhm_int_best", "ha_fwhm_int_kms_err": "Ha_fwhm_int_best_err",
+    "ha_fwhm_obs_kms": "Ha_fwhm_obs_best", "ha_fwhm_unresolved": "Ha_fwhm_unresolved_best",
+    "ha_fwhm_grating": "Ha_fwhm_best_grating"}
 EXTRA = {"dv_err": ("delta_v_err", "dverr", "Delta_v error"),
          "centre_err": ("lya_centre_err", "cenerr", "Lya line-centre error")}
 
@@ -176,13 +223,21 @@ def parse_args():
     p.add_argument("--centre-err-max", type=float, default=None,
                    help="km/s, needed with --extra-cut centre_err")
     p.add_argument("--zsys", default=pc.ZSYS_CATALOG)
-    p.add_argument("--fits-csv", default=f"{CAT}/lya_fits_mc.csv")
+    p.add_argument("--fits-csv", default=pc.LYA_FITS_MC)
     p.add_argument("--detections", default=f"{CAT}/lya_detections.csv")
     p.add_argument("--thresholds", default=f"{CAT}/lya_false_pos_thresholds.csv")
     p.add_argument("--pairs", default=CLOSE_PAIRS)
     p.add_argument("--muv-csv", default=MUV_FITS)
     p.add_argument("--double-csv", default=DOUBLE_FITS,
                    help="fit_lya_double_peak.py output, joined if it exists")
+    p.add_argument("--sed-csv", default=SED_PROPS,
+                   help="build_sed_catalog.py output, joined if it exists")
+    p.add_argument("--shape-csv", default=SHAPE_CSV,
+                   help="measure_lya_shape.py output, joined if it exists")
+    p.add_argument("--ha-csv", default=HA_SUMMARY,
+                   help="lime_fit_lines.py Halpha summary, for the Halpha FWHM, if it exists")
+    p.add_argument("--fesc-csv", default=FESC_CSV,
+                   help="measure_lya_fesc.py output, joined if it exists")
     p.add_argument("--pair-keep", type=int, nargs="*", default=list(pc.CLOSE_PAIR_KEEP))
     p.add_argument("--out", default=pc.LYA_CATALOG)
     p.add_argument("--out-cuts", default=pc.LYA_DETECTION_CUTS)
@@ -243,9 +298,19 @@ def main():
           f"{'' if os.path.exists(a.muv_csv) else '  (not found, UV columns left blank)'}")
     print(f"  reading  {os.path.abspath(a.double_csv)}"
           f"{'' if os.path.exists(a.double_csv) else '  (not found, double-peak columns left blank)'}")
+    print(f"  reading  {os.path.abspath(a.sed_csv)}"
+          f"{'' if os.path.exists(a.sed_csv) else '  (not found, SED columns left blank)'}")
+    print(f"  reading  {os.path.abspath(a.shape_csv)}"
+          f"{'' if os.path.exists(a.shape_csv) else '  (not found, f_blue columns left blank)'}")
+    print(f"  reading  {os.path.abspath(a.ha_csv)}"
+          f"{'' if os.path.exists(a.ha_csv) else '  (not found, Halpha FWHM left blank)'}")
+    print(f"  reading  {os.path.abspath(a.fesc_csv)}"
+          f"{'' if os.path.exists(a.fesc_csv) else '  (not found, f_esc columns left blank)'}")
 
     zs_all = pd.read_csv(a.zsys)
     zs = zs_all[["ID", "z_sys", "z_sys_err", "z_sys_grating"]].copy()
+    zs["z_sys_line"] = (zs_all["z_sys_line"].values if "z_sys_line" in zs_all.columns
+                        else np.nan)
     fits = pd.read_csv(a.fits_csv)
     det = pd.read_csv(a.detections)[["ID", "status"]]
     thr = pd.read_csv(a.thresholds).iloc[0]
@@ -295,8 +360,7 @@ def main():
         out[col] = s_idx[scol].values
     out["delta_v_single"] = out["delta_v"]
     out["delta_v_single_err"] = out["delta_v_err"]
-    has_single = out["z_lya"].notna()
-    out["lya_model"] = np.where(has_single, "single", "")
+    out["lya_model"] = [pc.preferred_lya_model(zl, np.nan) for zl in out["z_lya"].values]
     for c in ["dbic_double", "double_reason"] + DOUBLE_ONLY:
         out[c] = np.nan
     out["double_reason"] = out["double_reason"].astype(object)
@@ -307,11 +371,16 @@ def main():
         if miss:
             raise SystemExit(f"{a.double_csv} has no {miss}. Rerun fit_lya_double_peak.py")
         d_idx = dbl.set_index("ID").reindex(out["ID"])
-        is_dbl = (d_idx["double_peak"].values == 1) & has_single.values
+        # the shared rule, so lya_model and f_blue (measure_lya_shape.py) agree
+        model = np.array([pc.preferred_lya_model(zl, dp) for zl, dp in
+                          zip(out["z_lya"].values, d_idx["double_peak"].values)], dtype=object)
+        is_dbl = model == "double"
         out["dbic_double"] = d_idx["dbic"].values
         out["double_reason"] = np.where(is_dbl, "", d_idx["double_reason"].fillna("").values)
         out.loc[is_dbl, "lya_model"] = "double"
         for col, (_, dcol) in LINE_COLS.items():
+            if out[col].dtype == bool:      # fwhm_resolved, so the double's values fit
+                out[col] = out[col].astype(object)
             out.loc[is_dbl, col] = d_idx.loc[is_dbl, dcol].values
         for c in DOUBLE_ONLY:
             out.loc[is_dbl, c] = d_idx.loc[is_dbl, c].values
@@ -372,12 +441,89 @@ def main():
         for c in UV_COLS:
             out[c] = np.nan
 
-    cols = (["ID", "z_sys", "z_sys_err", "z_sys_grating", "lya_snr", "lya_model"]
+    # ---------------------------------------------------------------- SED columns
+    # Values are blanked where sed_ok is 0 (unordered or missing posteriors).
+    # sed_zred_ok = 0 (fit made at a redshift far from z_sys) is only reported.
+    sed_info = None
+    if os.path.exists(a.sed_csv):
+        sed = pd.read_csv(a.sed_csv)
+        sed["ID"] = sed["ID"].astype(int)
+        miss = [c for c in SED_COLS if c not in sed.columns]
+        if miss:
+            raise SystemExit(f"{a.sed_csv} has no {miss}. Rerun build_sed_catalog.py")
+        bad = sed["sed_ok"] != 1
+        sed.loc[bad, [c for c in SED_COLS if c not in ("sed_ok", "sed_zred_ok")]] = np.nan
+        out = out.merge(sed[["ID"] + SED_COLS], on="ID", how="left")
+        for c in ("sed_ok", "sed_zred_ok"):
+            out[c] = out[c].fillna(0).astype(int)
+        sed_info = (int((out["sed_ok"] == 1).sum()),
+                    out.loc[out["sed_ok"] == 0, "ID"].tolist(),
+                    out.loc[(out["sed_ok"] == 1) & (out["sed_zred_ok"] == 0), "ID"].tolist())
+    else:
+        for c in SED_COLS:
+            out[c] = 0 if c in ("sed_ok", "sed_zred_ok") else np.nan
+
+    # ---------------------------------------------------------------- f_blue
+    shape_info = None
+    if os.path.exists(a.shape_csv):
+        sh = pd.read_csv(a.shape_csv)
+        sh["ID"] = sh["ID"].astype(int)
+        miss = [c for c in SHAPE_COLS + ["shape_model"] if c not in sh.columns]
+        if miss:
+            raise SystemExit(f"{a.shape_csv} has no {miss}. Rerun measure_lya_shape.py")
+        out = out.merge(sh[["ID", "shape_model"] + SHAPE_COLS], on="ID", how="left")
+        # f_blue is only ever kept when it was measured with the catalogue's
+        # own lya_model. Any other source gets blank f_blue columns.
+        measured = out["f_blue_int"].notna() | out["f_blue_data"].notna()
+        odd = measured & (out["shape_model"].fillna("") != out["lya_model"])
+        out.loc[odd, SHAPE_COLS] = np.nan
+        shape_info = (int(out["f_blue_int"].notna().sum()), out.loc[odd, "ID"].tolist())
+        out = out.drop(columns="shape_model")
+    else:
+        for c in SHAPE_COLS:
+            out[c] = np.nan
+
+    # ---------------------------------------------------------------- Halpha FWHM
+    if os.path.exists(a.ha_csv):
+        ha = pd.read_csv(a.ha_csv)
+        ha["ID"] = ha["ID"].astype(int)
+        have = {k: v for k, v in HA_COLS.items() if v in ha.columns}
+        ha = ha[["ID"] + list(have.values())].rename(columns={v: k for k, v in have.items()})
+        out = out.merge(ha, on="ID", how="left")
+    for c in HA_COLS:
+        if c not in out.columns:
+            out[c] = np.nan
+
+    # ---------------------------------------------------------------- f_esc
+    # f_esc depends on the detection rule (detection or limit), so it is only
+    # kept when lya_fesc.csv was made from a catalogue with this rule. The
+    # Halpha columns do not depend on the rule and are always kept.
+    fesc_info = None
+    if os.path.exists(a.fesc_csv):
+        fe = pd.read_csv(a.fesc_csv)
+        fe["ID"] = fe["ID"].astype(int)
+        miss = [c for c in FESC_COLS + HA_FLAG_COLS + ["det_rule"] if c not in fe.columns]
+        if miss:
+            raise SystemExit(f"{a.fesc_csv} has no {miss}. Rerun measure_lya_fesc.py")
+        out = out.merge(fe[["ID"] + FESC_COLS + HA_FLAG_COLS], on="ID", how="left")
+        fe_rules = sorted(fe["det_rule"].dropna().astype(str).unique())
+        if fe_rules != [tag]:
+            out[FESC_COLS] = np.nan
+            fesc_info = ("rule", fe_rules)
+        else:
+            fesc_info = ("ok", int((out["fesc_status"] == "detection").sum()),
+                         int((out["fesc_status"] == "upper_limit").sum()))
+    else:
+        for c in FESC_COLS + HA_FLAG_COLS:
+            out[c] = np.nan
+
+    cols = (["ID", "z_sys", "z_sys_err", "z_sys_grating", "z_sys_line", "lya_snr", "lya_model"]
             + list(LINE_COLS)
             + ["lya_det", "det_reason", "det_rule", "lya_status",
                "close_pair_group", "pair_status", "in_analysis",
                "dbic_double", "double_reason"] + DOUBLE_ONLY
-            + ["delta_v_single", "delta_v_single_err"] + UV_COLS)
+            + ["delta_v_single", "delta_v_single_err"] + SHAPE_COLS + list(HA_COLS)
+            + FESC_COLS + HA_FLAG_COLS + UV_COLS + SED_COLS)
     out = out[cols].sort_values("ID").reset_index(drop=True)
 
     # ---------------------------------------------------------------- report
@@ -454,6 +600,35 @@ def main():
     else:
         print("  double preferred        not known, no lya_double_fits.csv, every line "
               "quantity is from the single fit")
+    if shape_info is None:
+        print("  f_blue                  not joined, no lya_shape.csv")
+    else:
+        print(f"  f_blue                  {shape_info[0]} sources")
+        if shape_info[1]:
+            print(f"      WARNING f_blue left blank for {shape_info[1]}, measured with a "
+                  "different model from lya_model (the fits changed since). Rerun "
+                  "measure_lya_shape.py, then this script")
+    print(f"  Halpha FWHM             {int(out['ha_fwhm_int_kms'].notna().sum())} sources "
+          "with an intrinsic width")
+    if fesc_info is None:
+        print("  f_esc                   not joined, no lya_fesc.csv")
+    elif fesc_info[0] == "rule":
+        print(f"  f_esc                   WARNING left blank, lya_fesc.csv was made with rule "
+              f"{fesc_info[1]}, not {tag}. Rerun measure_lya_fesc.py, then this script")
+    else:
+        print(f"  f_esc                   {fesc_info[1]} values, {fesc_info[2]} upper limits "
+              "(rerun measure_lya_fesc.py after any change to the Lya fits or Halpha)")
+    if sed_info is None:
+        print("  SED properties          not joined, no sed_properties.csv")
+    else:
+        n_sed, no_sed, zred_off = sed_info
+        n_sed_ana = int(((out["sed_ok"] == 1) & ana).sum())
+        print(f"  SED properties          {n_sed} of {len(out)} sources "
+              f"({n_sed_ana} tested and in the analysis)")
+        if no_sed:
+            print(f"      no usable SED       {no_sed}")
+        if zred_off:
+            print(f"      WARNING SED fit at a redshift far from z_sys {zred_off}")
     nt = out.loc[~ok, ["ID", "lya_status"]].values.tolist()
     if nt:
         print(f"  not tested              {nt}")
