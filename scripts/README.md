@@ -391,12 +391,31 @@ Writes one folder per rule and set, `plots/lya_science/<rule>_<set>/` (e.g. `plo
 | `gal_` | `dv_vs_muv` (Mason+18, with a fit of log Δv), `fwhm_vs_muv` (Mason+19, Prieto-Lyon+25), `fblue_int_vs_muv`, `fwhm_models[_split]` (as before), and dv, fwhm and fblue_int against M*, SFR100, sSFR100, A_V and ξ_ion | halo mass, feedback, dust and the ionising spectrum |
 | `chk_` | `dv_by_zline`, `dv_by_grating`, `dv_single_vs_double`, `dv_vs_snr`, `fwhm_vs_snr`, `fblue_int_vs_data`, and in `det_vs_nondet` `flux_vs_z`, `snr_vs_z` and `det_vs_nondet_cdfs` | systematics and selection |
 
+**f_esc figures** (new, folder `plots/lya_science/<rule>_fesc/`, e.g. `plots/lya_science/snr5_fesc/`). Detections and 5σ upper limits together, `in_analysis == 1`, colour and marker by Hα case, limits as open triangles. Each figure is made for three subsets of the Hα cases and two dust versions, and the names end `_<subset>_<dust>`.
+
+| Name part | Meaning |
+|---|---|
+| `case1` | spectral Hα, Balmer A_Hα |
+| `case12` | plus case 2 (spectral Hα, SED A_Hα) |
+| `case123` | plus case 3 (photometric Hα, SED A_Hα) |
+| `dustbest` | `fesc_lya`, Balmer A_Hα for case 1, SED otherwise |
+| `dustsed` | `fesc_lya_sed`, SED A_Hα for every source |
+
+- `fesc_vs_<p>_<subset>_<dust>.png` for p = muv, beta, logM, logsfr10, logssfr10, av, logxion, z, dv, fwhm, fblue_int, and aha_used as a check. Δv, FWHM and f_blue show detections only.
+- `fesc_overview_<subset>_<dust>.png`, all of them on one page.
+- `fesc_summary.png` and `fesc_summary.csv`, the median of the detections and the reverse Kaplan-Meier median of all per subset and dust version.
+- `fesc_by_case.png`, f_esc of each case, and Balmer against SED f_esc for case 1.
+- Statistics are Spearman ρ of the detections and a censored Kendall τ_c of detections and limits (Isobe, Feigelson & Nelson 1986 pair rule, p from `--n-perm` shuffles). τ_c is diluted by pairs whose order is unknown, so compare its p rather than its size. Panels marked "shares Hα" (SFR10, sSFR10, ξ_ion, A_Hα used) have Hα on both axes. The script prints a digest of every correlation for every subset at the end.
+
+
 Splits, as suffixes. `zbins` (three z bins at `--z-edges` 3.5 4.5), `zbins2` (at `--z-split` 3.5), `muvbins`, `massbins`, `ssfrbins` and `avbins` (two bins at the set's median), and `model` (single against double). Only the splits that make sense for a figure are made, and `--bins` limits them. Each scatter panel shows Spearman ρ and p. `stats.csv` has one row per panel with N, Spearman ρ and p, the 16th to 84th percentile of ρ over `--n-stat-mc` (1000) redraws within the errors, Kendall τ and p, the partial ρ controlling for z_sys (where neither axis or split is z), the fit slope and intercept with bootstrap errors where a fit is drawn, and for the histogram, fraction and comparison figures their medians, fractions and KS, Kruskal-Wallis or Anderson-Darling p (SciPy caps the AD p between 0.001 and 0.25). The terminal lists every unbinned panel with p < 0.05. Fits allow for errors on both axes and leave out unresolved lines, which enter the correlations at their FWHM limit.
 
 f_blue figures are made for each of `--fblue-kinds` (int and data). The data version falls with Δv from the LSF alone, so use int for the physics and data as a check. `--fwhm-kind obs` uses the observed widths (names gain `obs_`), the closer comparison for Verhamme+18. About two minutes per set, mostly writing the figures.
 ```bash
 python plot_lya_science.py                                       # detections
 python plot_lya_science.py --sets detections non_detections
+python plot_lya_science.py --fesc-only                           # only the f_esc figures
+python plot_lya_science.py --no-fesc
 python plot_lya_science.py --bins zbins2 model --no-pdf          # fewer figures, quicker
 python plot_lya_science.py --fwhm-kind obs
 python plot_lya_science.py --muv-source fit                      # interim M_UV, muvfit_ names

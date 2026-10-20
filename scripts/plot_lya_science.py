@@ -31,7 +31,8 @@ One folder per detection rule and set, --outdir/<rule>_<set>/ (default
   stats.csv                        one row per figure panel, see Statistics
   all_figures.pdf                  every figure of the set, one per page, to browse
 and, once for both sets, --outdir/<rule>_det_vs_nondet/ for the comparison of
-detections and non-detections. Reruns overwrite.
+detections and non-detections, and --outdir/<rule>_fesc/ for the escape
+fractions (section E). Reruns overwrite.
 
 Binned versions
 ---------------
@@ -99,6 +100,37 @@ D. Galaxy properties (gal_)
                              logssfr100, av, logxion (halo mass, feedback,
                              dust and the ionising spectrum)
 
+E. Lya escape fractions (fesc_), in their own folder --outdir/<rule>_fesc/
+  f_esc from measure_lya_fesc.py, detections and 5 sigma upper limits
+  together (Lya non-detections with Halpha), in_analysis == 1. Every figure
+  is made for each subset of the Halpha cases (build_ha_flux_corrections.py)
+  and each dust version, named <...>_<subset>_<dust>:
+    subset   case1    Halpha from a spectrum, A_Ha from the Balmer decrement
+             case12   plus case 2 (spectrum, SED A_Ha)
+             case123  plus case 3 (photometric Halpha, SED A_Ha)
+    dust     dustbest fesc_lya, Balmer A_Ha for case 1, SED A_Ha otherwise
+             dustsed  fesc_lya_sed, the SED A_Ha for every source
+  fesc_vs_<p>_<subset>_<dust>    f_esc against p = muv, beta, logM, logsfr10,
+                             logssfr10, av, logxion, z, dv, fwhm, fblue_int, and
+                             aha_used (the A_Ha used, a check, as it sits in
+                             f_esc). Colour and marker by case, limits as open
+                             triangles. dv, fwhm and fblue_int show detections
+                             only (the non-detection profiles are fits to noise)
+  fesc_overview_<subset>_<dust>  all of these on one page
+  fesc_summary                   median of the detections and the reverse
+                             Kaplan-Meier median of all (limits included) per
+                             subset and dust version, with fesc_summary.csv
+  fesc_by_case                   f_esc of each case, and Balmer against SED
+                             f_esc for case 1
+  Panels marked "shares Halpha" have Halpha in both axes (SED SFR and sSFR
+  are fitted to photometry containing Halpha, xi_ion is Halpha over UV), so
+  part of the trend is built in.
+  Statistics: Spearman rho of the detections, and a censored Kendall tau_c
+  of detections and limits together (Isobe, Feigelson & Nelson 1986 pair
+  rule, p from --n-perm shuffles). tau_c is diluted by pairs whose order is
+  unknown, so compare its p, not its size, with rho. A digest of every
+  correlation for every subset is printed at the end.
+
 F. Checks (chk_)
   chk_dv_by_zline, chk_dv_by_grating   Delta_v split by the line and
                              grating that set z_sys, with KS p
@@ -145,6 +177,8 @@ python plot_lya_science.py --sets detections non_detections
 python plot_lya_science.py --bins z zbins2 model    # only these splits
 python plot_lya_science.py --fwhm-kind obs
 python plot_lya_science.py --muv-source fit         # interim power-law M_UV
+python plot_lya_science.py --fesc-only              # only the f_esc figures
+python plot_lya_science.py --fesc-subsets case1 case123 --fesc-dust dustsed
 """
 
 import argparse
@@ -225,6 +259,12 @@ Q = {
     "ha_fwhm": (r"FWHM$_{\rm H\alpha,\,int}$ [km s$^{-1}$]", 50.0),
     "vresid": (r"$\Delta v - \Delta v_{\rm V18}$ [km s$^{-1}$]", 50.0),
     "vmid": (r"$(\Delta v_{\rm red}+\Delta v_{\rm blue})/2$ [km s$^{-1}$]", 50.0),
+    "fesc": (r"$f_{\rm esc}^{\rm Ly\alpha}$", 0.02),
+    "fesc_sed": (r"$f_{\rm esc}^{\rm Ly\alpha}$ (SED $A_{\rm H\alpha}$)", 0.02),
+    "aha_used": (r"$A_{\rm H\alpha}$ used [mag]", 0.1),
+    "beta": (r"$\beta_{\rm UV}$", 0.1),
+    "logsfr10": (r"$\log_{10}({\rm SFR}_{10}/{\rm M}_\odot\,{\rm yr}^{-1})$", 0.25),
+    "logssfr10": (r"$\log_{10}({\rm sSFR}_{10}/{\rm yr}^{-1})$", 0.25),
 }
 MUV_SOURCES = {
     # --muv-source -> (value, lower error, upper error, mean error)
@@ -349,6 +389,21 @@ def load_sample(catalog_csv, fwhm_kind="int", resolve_frac=0.5, muv_max_err=0.5,
     put(df, "vresid", df["dv"] - (VERH_SLOPE * df["fwhm"] + VERH_INT),
         np.hypot(df["dv_lo"], VERH_SLOPE * df["fwhm_lo"]))
     put(df, "vmid", 0.5 * (df["dv"] + df["dv_blue"]), 0.5 * np.hypot(df["dv_lo"], df["dv_blue_lo"]))
+    # escape fractions (measure_lya_fesc.py), the Halpha case and the beta fit
+    put(df, "fesc", _num(cat, "fesc_lya"), _num(cat, "fesc_lya_err_lo"), _num(cat, "fesc_lya_err_hi"))
+    put(df, "fesc_sed", _num(cat, "fesc_lya_sed"), _num(cat, "fesc_lya_sed_err_lo"),
+        _num(cat, "fesc_lya_sed_err_hi"))
+    df["fesc_lim"] = _num(cat, "fesc_lya_is_limit").fillna(0).astype(int).values == 1
+    df["fesc_status"] = cat["fesc_status"].values if "fesc_status" in cat.columns else ""
+    df["ha_case"] = _num(cat, "ha_case").values
+    df["dust_method"] = cat["dust_method"].values if "dust_method" in cat.columns else ""
+    put(df, "aha_used", _num(cat, "a_ha"), _num(cat, "a_ha_err_lo"), _num(cat, "a_ha_err_hi"))
+    bgood = _num(cat, "beta_fit_good") == 1 if "beta_fit_good" in cat.columns else \
+        pd.Series(True, index=cat.index)
+    put(df, "beta", _num(cat, "beta_fit").where(bgood), _num(cat, "beta_fit_err").where(bgood))
+    for key in ("logsfr10", "logssfr10"):
+        col = f"sed_{key}"
+        put(df, key, _num(cat, col), _num(cat, f"{col}_err_lo"), _num(cat, f"{col}_err_hi"))
     return df
 
 
@@ -1178,6 +1233,363 @@ def det_vs_nondet(args, df_all, outdir, rule, pdf):
 
 
 # ---------------------------------------------------------------------------
+# E. Escape fractions (fesc_), detections and upper limits together
+# ---------------------------------------------------------------------------
+# case subsets of the Halpha correction (build_ha_flux_corrections.py)
+FESC_SUBSETS = {"case1": (1,), "case12": (1, 2), "case123": (1, 2, 3)}
+# dust versions: best = fesc_lya (Balmer for case 1, SED otherwise),
+# sed = fesc_lya_sed (SED A_Ha for every source)
+FESC_DUST = {"dustbest": "fesc", "dustsed": "fesc_sed"}
+FESC_PROPS = ["muv", "beta", "logM", "logsfr10", "logssfr10", "av", "logxion", "z", "dv",
+              "fwhm", "fblue_int"]
+# quantities that share the Halpha flux with f_esc, so part of any trend is built in
+FESC_SHARED = {"logsfr10": "SED SFR is fitted to photometry that contains Halpha",
+               "logssfr10": "SED sSFR is fitted to photometry that contains Halpha",
+               "logxion": "xi_ion is Halpha over UV, f_esc is Lya over Halpha",
+               "aha_used": "A_Ha corrects the Halpha in the denominator of f_esc"}
+# Lya profile quantities: only meaningful for detections, so limits are left out
+FESC_DET_ONLY = ("dv", "fwhm", "fblue_int")
+CASE_STYLE = {1: ("#2a9d8f", "o", "case 1 spec+Balmer"), 2: ("#3b6fb6", "s", "case 2 spec+SED"),
+              3: ("#e39b3b", "D", "case 3 phot+SED")}
+
+
+def km_median_upper(v, lim):
+    """Reverse Kaplan-Meier median of data with upper limits (Paper 1): the
+    values are negated so the limits become right-censored, the product-limit
+    estimator is run, and the median negated back. NaN if the survival
+    function never reaches 0.5 (more than half are limits below every
+    detection). Agrees with lifelines KaplanMeierFitter on -v except where S
+    is exactly 0.5 between two points, where lifelines' rounding picks either."""
+    v, lim = np.asarray(v, float), np.asarray(lim, bool)
+    ok = np.isfinite(v)
+    v, lim = v[ok], lim[ok]
+    if v.size < 3 or (~lim).sum() == 0:
+        return np.nan
+    t, ev = -v, ~lim
+    s, at_risk = 1.0, t.size
+    for tt in np.unique(t):
+        here = t == tt
+        d = int((here & ev).sum())
+        if d:
+            s *= 1.0 - d / at_risk
+        at_risk -= int(here.sum())
+        if s <= 0.5 + 1e-9:      # first point with S <= 0.5
+            return float(-tt)
+    return np.nan
+
+
+def km_with_errors(v, lim, n_boot, rng):
+    med = km_median_upper(v, lim)
+    if not np.isfinite(med):
+        return med, np.nan, np.nan
+    v, lim = np.asarray(v, float), np.asarray(lim, bool)
+    b = [km_median_upper(v[i], lim[i]) for i in (rng.integers(0, v.size, v.size)
+                                                 for _ in range(n_boot))]
+    lo, hi = np.nanpercentile(b, [16, 84])
+    return med, float(med - lo), float(hi - med)
+
+
+def censored_kendall(x, y, ylim, n_perm, rng):
+    """Kendall tau with upper limits on y (Isobe, Feigelson & Nelson 1986
+    pair rule). A pair counts only where the order in y is known: two
+    detections, or a limit below a detection. tau = sum of sign(dx) sign(dy)
+    over known pairs / all pairs, so with many limits tau_c is smaller than
+    an ordinary tau for the same trend. Read its p, from n_perm shuffles of x."""
+    x, y, ylim = (np.asarray(a) for a in (x, y, ylim))
+    ok = np.isfinite(x) & np.isfinite(y)
+    x, y, ylim = x[ok].astype(float), y[ok].astype(float), ylim[ok].astype(bool)
+    n = x.size
+    if n < 5:
+        return np.nan, np.nan, n
+    det = ~ylim
+    dy = np.sign(y[:, None] - y[None, :])
+    both = det[:, None] & det[None, :]
+    i_lim_below = ylim[:, None] & det[None, :] & (y[:, None] <= y[None, :])
+    j_lim_below = det[:, None] & ylim[None, :] & (y[None, :] <= y[:, None])
+    Y = np.where(both, dy, 0.0) - i_lim_below + j_lim_below
+    iu = np.triu_indices(n, 1)
+    Yu = Y[iu]
+    npair = n * (n - 1) / 2
+
+    def tau_of(xx):
+        return float(np.sum(np.sign(xx[:, None] - xx[None, :])[iu] * Yu) / npair)
+    t0 = tau_of(x)
+    perm = np.array([tau_of(rng.permutation(x)) for _ in range(n_perm)])
+    p = float((np.sum(np.abs(perm) >= abs(t0)) + 1) / (n_perm + 1))
+    return t0, p, n
+
+
+def fesc_frame(df, cases, fcol):
+    """Tested sources of the cases with a value of fcol (detection or limit)."""
+    d = df[df["ha_case"].isin(cases) & df["det"].isin([0, 1])].copy()
+    d = d[np.isfinite(d[fcol].to_numpy(float)) & (d[fcol] > 0)]
+    d["is_lim"] = d["fesc_lim"].to_numpy(bool)
+    return d
+
+
+def draw_fesc(ax, d, x, fcol, ms=18):
+    """Detections by case (colour and marker), limits as open down triangles
+    with an arrow. Returns nothing, draws on ax."""
+    xe = err2(d, x)
+    for c, (col, mk, lab) in CASE_STYLE.items():
+        m = (d["ha_case"] == c).to_numpy()
+        det = m & ~d["is_lim"].to_numpy()
+        lim = m & d["is_lim"].to_numpy()
+        if det.any():
+            dd = d[det]
+            ax.errorbar(dd[x], dd[fcol], xerr=xe[:, det], yerr=err2(dd, fcol), fmt="none",
+                        ecolor="0.7", elinewidth=0.6, zorder=1)
+            ax.scatter(dd[x], dd[fcol], s=ms, marker=mk, color=col, edgecolor="black",
+                       linewidths=0.4, zorder=3, label=f"{lab} ({int(det.sum())})")
+        if lim.any():
+            dl = d[lim]
+            yv = dl[fcol].to_numpy(float)
+            ax.errorbar(dl[x], yv, yerr=[yv * 0.45, np.zeros_like(yv)], uplims=True, fmt="none",
+                        ecolor=col, elinewidth=0.6, capsize=1.5, alpha=0.6, zorder=1)
+            ax.scatter(dl[x], yv, s=ms * 0.8, marker="v", facecolors="white", edgecolors=col,
+                       linewidths=0.8, zorder=2)
+    ax.set_yscale("log")
+    if x == "muv":
+        lo, hi = ax.get_xlim()
+        ax.set_xlim(max(lo, hi), min(lo, hi))
+
+
+def fesc_stats(ctx, d, x, fcol):
+    """Spearman of the detections and the censored Kendall tau of all."""
+    a = ctx.args
+    dd = finite(d[~d["is_lim"]], [x, fcol])
+    st = correlation(dd, x, fcol, a.n_stat_mc, ctx.rng, control_z=(x != "z"))
+    tau, p_tau, n_all = censored_kendall(d[x], d[fcol], d["is_lim"], a.n_perm, ctx.rng)
+    st.update(N_det=st.get("N", 0), N_all=n_all, N_lim=int(n_all - st.get("N", 0)),
+              tau_cens=tau, p_tau_cens=p_tau)
+    return st
+
+
+def fesc_text(st):
+    def pt(p):
+        return "n/a" if not np.isfinite(p) else (f"{p:.2f}" if p >= 0.01 else f"{p:.0e}")
+    t = []
+    if np.isfinite(st.get("rho", np.nan)):
+        t.append(rf"det: $\rho$ = {st['rho']:+.2f}, p = {pt(st['p_rho'])}")
+    if np.isfinite(st.get("tau_cens", np.nan)):
+        t.append(rf"all: $\tau_c$ = {st['tau_cens']:+.2f}, p = {pt(st['p_tau_cens'])}")
+    return "\n".join(t) if t else f"N = {st.get('N_all', 0)}"
+
+
+def fesc_scatter(ctx, df, x, sub, dust):
+    fcol = FESC_DUST[dust]
+    d = finite(fesc_frame(df, FESC_SUBSETS[sub], fcol), [x])
+    if x in FESC_DET_ONLY:
+        d = d[~d["is_lim"]]
+    if (~d["is_lim"]).sum() < 3:
+        print(f"  [skip] fesc_vs_{x}_{sub}_{dust}: {int((~d['is_lim']).sum())} detections")
+        return None
+    fig, ax = plt.subplots(figsize=(MNRAS_COL_WIDTH_IN, 3.0))
+    draw_fesc(ax, d, x, fcol)
+    st = fesc_stats(ctx, d, x, fcol)
+    ctx.stat(f"fesc_vs_{x}_{sub}_{dust}", "all", x, fcol, st, subset=sub, dust=dust,
+             shared_halpha=FESC_SHARED.get(x, ""))
+    if x in FESC_SHARED:
+        ax.text(0.03, 0.97, "shares H$\\alpha$ with $f_{\\rm esc}$", transform=ax.transAxes,
+                va="top", fontsize=5.5, color="0.4")
+    ax.set_xlabel(Q[x][0])
+    ax.set_ylabel(Q[fcol][0] if dust == "dustsed" else Q["fesc"][0])
+    ax.set_title(f"{ctx.rule}  {sub}, {dust}  ({int((~d['is_lim']).sum())} det, "
+                 f"{int(d['is_lim'].sum())} limits)\n" + fesc_text(st).replace("\n", "    "),
+                 fontsize=6.5)
+    ax.legend(frameon=False, fontsize=5, loc="best")
+    ctx.save(fig, "fesc", f"vs_{x}_{sub}_{dust}")
+    return st
+
+
+def fesc_overview(ctx, df, sub, dust, props):
+    fcol = FESC_DUST[dust]
+    d0 = fesc_frame(df, FESC_SUBSETS[sub], fcol)
+    props = [p for p in props if d0[p].notna().any()]
+    if not props or (~d0["is_lim"]).sum() < 3:
+        return
+    nc = 4
+    nr = int(np.ceil(len(props) / nc))
+    fig, axes = plt.subplots(nr, nc, figsize=(MNRAS_PAGE_WIDTH_IN, 1.9 * nr), sharey=True,
+                             squeeze=False)
+    for ax, p in zip(axes.flat, props):
+        d = finite(d0, [p])
+        if p in FESC_DET_ONLY:
+            d = d[~d["is_lim"]]
+        draw_fesc(ax, d, p, fcol, ms=10)
+        st = fesc_stats(ctx, d, p, fcol)
+        ax.set_title(fesc_text(st), fontsize=5.5)
+        ax.set_xlabel(Q[p][0], fontsize=7)
+        ax.tick_params(labelsize=6)
+    for ax in axes.flat[len(props):]:
+        ax.axis("off")
+    for r in range(nr):
+        axes[r, 0].set_ylabel(Q["fesc"][0], fontsize=7)
+    h, l = axes.flat[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=3, frameon=False, fontsize=6,
+               bbox_to_anchor=(0.5, 1.0))
+    fig.suptitle(f"{ctx.rule}  {sub}, {dust}  ({int((~d0['is_lim']).sum())} det, "
+                 f"{int(d0['is_lim'].sum())} limits).  Open triangles: 5$\\sigma$ limits",
+                 fontsize=8, y=1.04)
+    fig.tight_layout()
+    ctx.save(fig, "fesc", f"overview_{sub}_{dust}")
+
+
+def fesc_summary(ctx, df):
+    """Numbers per subset and dust version, and the figure comparing them."""
+    a = ctx.args
+    rows = []
+    for sub in a.fesc_subsets:
+        for dust in a.fesc_dust:
+            fcol = FESC_DUST[dust]
+            d = fesc_frame(df, FESC_SUBSETS[sub], fcol)
+            v, lim = d[fcol].to_numpy(float), d["is_lim"].to_numpy(bool)
+            km, km_lo, km_hi = km_with_errors(v, lim, a.n_boot, ctx.rng)
+            det = v[~lim]
+            rows.append(dict(subset=sub, dust=dust, n_det=int((~lim).sum()), n_lim=int(lim.sum()),
+                             z_med=float(np.median(d["z"])) if len(d) else np.nan,
+                             z_min=float(d["z"].min()) if len(d) else np.nan,
+                             z_max=float(d["z"].max()) if len(d) else np.nan,
+                             det_median=float(np.median(det)) if det.size else np.nan,
+                             det_p16=float(np.percentile(det, 16)) if det.size else np.nan,
+                             det_p84=float(np.percentile(det, 84)) if det.size else np.nan,
+                             km_median=km, km_err_lo=km_lo, km_err_hi=km_hi))
+    s = pd.DataFrame(rows)
+    path = os.path.join(ctx.outdir, "fesc_summary.csv")
+    s.to_csv(path, index=False)
+    print(f"Wrote  {path}")
+    print("\n  subset   dust      det  lim   z range       det median (16-84)       KM median")
+    for _, r in s.iterrows():
+        km = (f"{r.km_median:.3f} (+{r.km_err_hi:.3f} -{r.km_err_lo:.3f})"
+              if np.isfinite(r.km_median) else "not reached")
+        print(f"  {r.subset:<8s} {r.dust:<9s} {r.n_det:>3d} {r.n_lim:>4d}   {r.z_min:.2f}-{r.z_max:.2f}"
+              f"   {r.det_median:.3f} ({r.det_p16:.3f}-{r.det_p84:.3f})   {km}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(MNRAS_PAGE_WIDTH_IN, 2.8))
+    xt = np.arange(len(a.fesc_subsets))
+    for k, (dust, mk, off) in enumerate((("dustbest", "o", -0.1), ("dustsed", "s", 0.1))):
+        ss = s[s["dust"] == dust].set_index("subset").reindex(a.fesc_subsets)
+        if ss["n_det"].isna().all():
+            continue
+        axes[0].errorbar(xt + off, ss["det_median"],
+                         yerr=[ss["det_median"] - ss["det_p16"], ss["det_p84"] - ss["det_median"]],
+                         fmt=mk, ms=5, mfc="white" if k else "k", mec="k", ecolor="0.5",
+                         capsize=2, label=dust)
+        axes[1].errorbar(xt + off, ss["km_median"], yerr=[ss["km_err_lo"], ss["km_err_hi"]], fmt=mk,
+                         ms=5, mfc="white" if k else "k", mec="k", ecolor="0.5", capsize=2,
+                         label=dust)
+    labels = [f"{sb}\n{int(s[(s.subset == sb)].n_det.max())} det, "
+              f"{int(s[(s.subset == sb)].n_lim.max())} lim" for sb in a.fesc_subsets]
+    for ax, t in zip(axes, ("detections, median and 16-84th", "all, reverse Kaplan-Meier median")):
+        ax.set_xticks(xt)
+        ax.set_xticklabels(labels, fontsize=7)
+        ax.set_yscale("log")
+        ax.set_title(t, fontsize=8)
+        ax.set_ylabel(Q["fesc"][0])
+        ax.legend(frameon=False, fontsize=6)
+    fig.suptitle(f"{ctx.rule}  f_esc by Halpha case subset and dust version", fontsize=8.5, y=1.02)
+    fig.tight_layout()
+    ctx.save(fig, "fesc", "summary")
+
+    # f_esc by case, and Balmer against SED for case 1
+    fig, axes = plt.subplots(1, 2, figsize=(MNRAS_PAGE_WIDTH_IN, 2.9))
+    d = fesc_frame(df, (1, 2, 3), "fesc")
+    for c, (col, mk, lab) in CASE_STYLE.items():
+        m = d["ha_case"] == c
+        xj = c + ctx.rng.uniform(-0.15, 0.15, int(m.sum()))
+        lim = d.loc[m, "is_lim"].to_numpy(bool)
+        yv = d.loc[m, "fesc"].to_numpy(float)
+        axes[0].scatter(xj[~lim], yv[~lim], marker=mk, color=col, edgecolor="k", lw=0.4, s=18)
+        axes[0].scatter(xj[lim], yv[lim], marker="v", facecolors="white", edgecolors=col, s=14)
+        det = yv[~lim]
+        if det.size:
+            axes[0].hlines(np.median(det), c - 0.3, c + 0.3, color=col, lw=1.2)
+    axes[0].set_xticks([1, 2, 3])
+    axes[0].set_xticklabels([CASE_STYLE[c][2].replace(" ", "\n", 1) for c in (1, 2, 3)], fontsize=6.5)
+    axes[0].set_yscale("log")
+    axes[0].set_ylabel(Q["fesc"][0])
+    axes[0].set_title("by case, line = median of detections", fontsize=8)
+    c1 = fesc_frame(df, (1,), "fesc")
+    c1 = c1[np.isfinite(c1["fesc_sed"].to_numpy(float)) & (c1["fesc_sed"] > 0)]
+    lim = c1["is_lim"].to_numpy(bool)
+    ax = axes[1]
+    ax.errorbar(c1.loc[~lim, "fesc_sed"], c1.loc[~lim, "fesc"], xerr=err2(c1[~lim], "fesc_sed"),
+                yerr=err2(c1[~lim], "fesc"), fmt="o", ms=4, mfc=CASE_STYLE[1][0], mec="k",
+                ecolor="0.7", elinewidth=0.6, label="detections")
+    ax.scatter(c1.loc[lim, "fesc_sed"], c1.loc[lim, "fesc"], marker="v", facecolors="white",
+               edgecolors=CASE_STYLE[1][0], s=14, label="limits")
+    v = np.r_[c1["fesc"], c1["fesc_sed"]]
+    if v.size:
+        lo_, hi_ = v[v > 0].min() / 2, v.max() * 2
+        ax.plot([lo_, hi_], [lo_, hi_], "k--", lw=0.8)
+        ax.set_xlim(lo_, hi_)
+        ax.set_ylim(lo_, hi_)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$f_{\rm esc}$ with SED $A_{\rm H\alpha}$")
+    ax.set_ylabel(r"$f_{\rm esc}$ with Balmer $A_{\rm H\alpha}$")
+    ax.set_title(f"case 1 ({int((~lim).sum())} det, {int(lim.sum())} limits)", fontsize=8)
+    ax.legend(frameon=False, fontsize=6)
+    fig.tight_layout()
+    ctx.save(fig, "fesc", "by_case")
+
+
+def fesc_section(args, df_all, outdir, rule, pdf):
+    ctx = Ctx(args, outdir, rule, "fesc", pdf)
+    if not df_all["fesc"].notna().any():
+        print("  [skip] fesc_: no fesc_lya in the catalogue (run measure_lya_fesc.py, then "
+              "build_lya_catalog.py)")
+        return ctx
+    d = df_all[df_all["fesc_status"].isin(["detection", "upper_limit"])].copy()
+    ctx.ref = d
+    n = d.groupby(["ha_case", "det"]).size().unstack(fill_value=0)
+    print(f"\n[fesc] {len(d)} sources with f_esc (detection or limit), by case and Lya det:")
+    for c, r in n.iterrows():
+        print(f"    case {int(c)}  {int(r.get(1, 0)):>3d} det  {int(r.get(0, 0)):>3d} limits")
+    nf = df_all[df_all["det"] == 1]
+    miss = nf.loc[~nf["fesc_status"].isin(["detection"]), "ID"].tolist()
+    if miss:
+        print(f"  Lya detections with no f_esc (no Halpha, case 0): {miss}")
+    fesc_summary(ctx, d)
+    for sub in args.fesc_subsets:
+        for dust in args.fesc_dust:
+            fesc_overview(ctx, d, sub, dust, FESC_PROPS)
+            for p in FESC_PROPS + ["aha_used"]:
+                if d[p].notna().any():
+                    fesc_scatter(ctx, d, p, sub, dust)
+    return ctx
+
+
+def write_fesc_digest(ctx):
+    """Print the f_esc correlations side by side for every subset."""
+    st = pd.DataFrame(ctx.rows)
+    if st.empty or "subset" not in st.columns:
+        return
+    st = st[st["plot"].str.startswith("fesc_vs_")]
+    print("\n  f_esc correlations (det: Spearman of detections, all: censored Kendall)")
+    for dust in ctx.args.fesc_dust:
+        s = st[st["dust"] == dust]
+        if s.empty:
+            continue
+        print(f"\n    {dust}")
+        print("    " + f"{'x':<11s}" + "".join(f"{sb:>27s}" for sb in ctx.args.fesc_subsets))
+        for x in dict.fromkeys(s["x"]):
+            cells = []
+            for sb in ctx.args.fesc_subsets:
+                r = s[(s["x"] == x) & (s["subset"] == sb)]
+                if r.empty:
+                    cells.append(f"{'':>27s}")
+                    continue
+                r = r.iloc[0]
+                star = "*" if r.get("p_rho", 1) < 0.05 else " "
+                star2 = "*" if r.get("p_tau_cens", 1) < 0.05 else " "
+                cells.append(f"  {r.get('rho', np.nan):+.2f}{star} ({int(r.get('N_det', 0)):2d})"
+                             f" {r.get('tau_cens', np.nan):+.2f}{star2} ({int(r.get('N_all', 0)):2d})")
+            print("    " + f"{x:<11s}" + "".join(cells) + ("   shares Halpha" if x in FESC_SHARED else ""))
+    print("    * p < 0.05.  Each cell: rho of detections (N det), tau_c of all (N det + limits)")
+
+
+# ---------------------------------------------------------------------------
 # One set
 # ---------------------------------------------------------------------------
 
@@ -1334,6 +1746,14 @@ def parse_args():
                    help="redraws within the errors for the range of Spearman rho")
     p.add_argument("--density-scaling", action="store_true")
     p.add_argument("--no-pdf", action="store_true", help="skip all_figures.pdf")
+    p.add_argument("--fesc-subsets", nargs="+", choices=list(FESC_SUBSETS),
+                   default=list(FESC_SUBSETS), help="Halpha case subsets for the f_esc figures")
+    p.add_argument("--fesc-dust", nargs="+", choices=list(FESC_DUST), default=list(FESC_DUST),
+                   help="dustbest = fesc_lya (Balmer where case 1), dustsed = fesc_lya_sed")
+    p.add_argument("--n-perm", type=int, default=2000,
+                   help="shuffles for the p of the censored Kendall tau")
+    p.add_argument("--no-fesc", action="store_true", help="skip the f_esc figures")
+    p.add_argument("--fesc-only", action="store_true", help="only the f_esc figures")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
@@ -1363,6 +1783,23 @@ def main():
     df = df[df["in_analysis"] == 1]
 
     written = []
+    if not args.no_fesc:
+        outdir = os.path.join(root, f"{rule}_fesc")
+        os.makedirs(outdir, exist_ok=True)
+        print(f"\n  writing  {outdir}/")
+        pdf = None if args.no_pdf else PdfPages(os.path.join(outdir, "all_figures.pdf"))
+        ctx = fesc_section(args, df, outdir, rule, pdf)
+        write_stats(ctx)
+        write_fesc_digest(ctx)
+        if pdf is not None:
+            pdf.close()
+            print(f"Wrote  {os.path.join(outdir, 'all_figures.pdf')}")
+        written.append((outdir, ctx.n_saved))
+    if args.fesc_only:
+        print("\n[DONE]")
+        for d, n in written:
+            print(f"  {n:>4d} figures in {d}/")
+        return
     for name in args.sets:
         outdir = os.path.join(root, f"{rule}_{name}")
         os.makedirs(outdir, exist_ok=True)
