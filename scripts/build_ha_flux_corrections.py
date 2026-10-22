@@ -38,27 +38,60 @@ decrements (--allow-extended keeps those lines).
 
 2. Slit-loss factor S, per line and spectrum
 --------------------------------------------
-The spectrum is compared with Isaac's total photometry (aperture flux x
-total_correction) in a band containing the line:
-  a. the band's transmission at the observed line is >= half its peak,
-  b. the line has data in the spectrum and >= --min-coverage (0.7) of the
-     band's photon-weighted response lies on the spectrum (small gaps are
-     interpolated, uncovered wings filled with the median f_nu in the band),
-  c. synthetic f_nu = int f_nu T / lambda dlambda / int T / lambda dlambda,
-  d. S = f_nu(photometry) / f_nu(synthetic), both at S/N >= --slit-snr-min (3),
-  e. a medium band is preferred, then a wide band, then the highest S/N.
-The synthetic and photometric fluxes both contain the lines and continuum,
-so S is the ratio of total light to light in the shutter. Sources whose
-photometry Flag contains 1, 2 or 3 get no direct factor (--allow-flagged-phot).
-A direct factor outside --slit-range (0.5 to 5) is not believed. Below 0.5
-the spectrum would hold twice the galaxy's total light, which points to a
-wrong match, a neighbour in the shutter or a bad background, and above 5 the
-shutter mostly missed the galaxy. Where no direct factor exists, or it is
-outside the range, S is the median of the direct factors of that line across
-the sample, with the NMAD as its error (slit_source sample_median, and
-ha_slit_note gives the rejected value). For each line, a spectrum with a direct factor is chosen over
-one without, then the highest line S/N.
-    F_Ha,total = S_Ha x F_Ha,obs
+For every spectrum, S = f_nu(Isaac total photometry) / f_nu(spectrum through
+the same filter) is computed in every NIRCam band (synthetic photometry,
+photon-weighted as for AB fluxes, Fukugita et al. 1996, Bessell & Murphy 2012):
+    f_nu(synthetic) = int f_nu T / lambda dlambda / int T / lambda dlambda
+A band passes if
+  a. its half-maximum range lies inside the grating's nominal range,
+  b. the spectrum covers >= --min-coverage (0.9) of its photon-weighted
+     response (small gaps are interpolated, the few uncovered per cent filled
+     with the median f_nu in the band),
+  c. both fluxes have S/N >= --slit-snr-min (3),
+  d. S lies inside --slit-range (0.5 to 5). Below 0.5 the spectrum would hold
+     twice the galaxy's total light (a wrong match, a neighbour in the shutter
+     or a bad background), above 5 the shutter mostly missed the galaxy.
+Both fluxes contain the lines and the continuum, so S is total light over
+light in the shutter. Sources whose photometry Flag contains 1, 2 or 3 get
+no factor (--allow-flagged-phot). Every passing band is written to
+--bands-out. Then, for each line, by --slit-mode:
+  local (default)
+    1. line_band    a passing band containing the line (transmission at the
+                    line >= half its peak), medium before wide, then S/N
+    2. interp       otherwise S interpolated in log S against log lambda
+                    between the nearest passing band blueward and redward of
+                    the line, so S is taken at the line's own wavelength
+    3. spec_median  otherwise (bands on one side only) the median of the
+                    spectrum's passing bands
+  median
+    the median over all passing bands of the spectrum, as Shapley et al.
+    (2023) scale each spectrum by the median ratio over all bands with good
+    S/N (they require 3, --min-bands here, default 2). With fewer bands the
+    local choice is used.
+  band
+    only the band containing the line (the previous behaviour)
+A median's error is the larger of the scatter between bands / sqrt(N) and the
+typical single-band error. An interpolated S carries both bands' errors.
+Where none of these exist the spectrum has no factor of its own and
+--fallback grating (default) takes, in order,
+  other_grating   the median S of the same source's spectrum in another
+                  grating (most passing bands first). The error adds the
+                  measured scatter between two gratings of one source
+                  (fractional NMAD of their ratio) in quadrature.
+  grating_median  the median of the own factors of that line in that
+                  grating, with its NMAD as the error, if the grating has
+                  at least --min-grating of them
+  sample_median   the median of the own factors of that line over the whole
+                  sample, with the NMAD as its error
+--fallback sample goes straight to the sample median (the previous
+behaviour). ha_slit_note says why the spectrum had no factor. Slit losses
+scatter by about 45 per cent from source to source but agree to about 10
+per cent between two gratings of one source, so the same source is used
+first. For each line, a spectrum with its
+own factor is chosen over one without, then the highest line S/N. Every
+spectral Halpha also gets the spectrum median and the number of passing bands
+(ha_slit_spec_median, ha_slit_nbands), to check the factor used.
+    F_Ha,total = S x F_Ha,obs
 
 3. Balmer decrement (case 1)
 ----------------------------
@@ -115,6 +148,9 @@ Columns of ha_flux_corrections.csv
   dust_method (balmer, sed, none), balmer_spectra (same, different, none)
   ha_grating, ha_flux_obs, ha_flux_obs_err, ha_snr          spectral Halpha used
   ha_slit_factor, ha_slit_factor_err, ha_slit_band, ha_slit_source
+                                (line_band, interp, spec_median, median, other_grating,
+                                 grating_median, sample_median)
+  ha_slit_note, ha_slit_spec_median, ha_slit_nbands
   hb_grating, hb_flux_obs, hb_flux_obs_err, hb_snr          Hbeta of the decrement
   hb_slit_factor, hb_slit_factor_err, hb_slit_band, hb_slit_source
   balmer_ha_grating             spectrum of the decrement's Halpha
@@ -143,6 +179,7 @@ Outputs
 -------
   jwst_catalogs/ha_flux_corrections.csv
   jwst_catalogs/ha_flux_corrections_mc.npz      MC draws for measure_lya_fesc.py
+  jwst_catalogs/ha_slit_bands.csv               every passing band factor of every spectrum
   plots/ha_flux_corrections.png                 diagnostic figure
 
 Usage
@@ -150,6 +187,8 @@ Usage
 python build_ha_flux_corrections.py --download-filters   # once, if the curves are missing
 python build_ha_flux_corrections.py
 python build_ha_flux_corrections.py --balmer-basis slitcorr
+python build_ha_flux_corrections.py --slit-mode median            # Shapley-style median of all bands
+python build_ha_flux_corrections.py --slit-mode band --min-coverage 0.7   # the previous behaviour
 python build_ha_flux_corrections.py --sii-ha 0.1 --phot-one-side
 """
 
@@ -216,13 +255,32 @@ def parse_args():
                    help="flux S/N for a spectral or photometric Halpha to be used")
     p.add_argument("--hb-snr-min", type=float, default=3.0,
                    help="flux S/N for Hbeta to be used in the decrement")
+    p.add_argument("--slit-mode", choices=["local", "median", "band"], default="local",
+                   help="local: the band containing the line, else interpolate between the "
+                        "nearest bands either side, else the spectrum median. median: the "
+                        "median over all passing bands (Shapley et al. 2023), local if fewer "
+                        "than --min-bands. band: only the band containing the line")
     p.add_argument("--slit-snr-min", type=float, default=3.0)
-    p.add_argument("--min-coverage", type=float, default=0.70)
+    p.add_argument("--min-coverage", type=float, default=0.90,
+                   help="fraction of a band's photon-weighted response that the spectrum must cover")
+    p.add_argument("--min-bands", type=int, default=2,
+                   help="bands needed for --slit-mode median (Shapley et al. use 3)")
     p.add_argument("--slit-range", type=float, nargs=2, default=[0.5, 5.0],
-                   help="direct slit factors outside this range are replaced by the sample median")
+                   help="band slit factors outside this range are not used")
+    p.add_argument("--bands-out", default=f"{CAT_DIR}/ha_slit_bands.csv",
+                   help="every band slit factor of every spectrum used")
     p.add_argument("--allow-extended", action="store_true",
                    help="also use lines beyond the grating's nominal wavelength range")
     p.add_argument("--min-for-median", type=int, default=3)
+    p.add_argument("--fallback", choices=["grating", "sample"], default="grating",
+                   help="for a spectrum with no factor of its own. grating: the same source's "
+                        "other grating, else the median of its grating, else the sample median. "
+                        "sample: the sample median only")
+    p.add_argument("--min-grating", type=int, default=5,
+                   help="own factors a grating needs before its median is used as a fallback")
+    p.add_argument("--cross-grating-err", type=float, default=0.10,
+                   help="fractional error added for an other_grating factor if fewer than 5 "
+                        "sources have factors in two gratings to measure it from")
     p.add_argument("--allow-flagged-phot", action="store_true",
                    help="also use photometry whose Flag contains 1, 2 or 3")
     p.add_argument("--balmer-basis", choices=["auto", "slitcorr"], default="auto",
@@ -373,36 +431,100 @@ def synthetic_fnu(w, f, e, lam_f, t_f):
     return val / 1e-29, err / 1e-29, cov
 
 
-def direct_slit_factor(spec, lam_line, phot_row, curves, a):
-    """Best direct factor for one line in one spectrum: dict or (None, reason)."""
+DIRECT_SOURCES = ("line_band", "interp", "spec_median", "median")
+SLIT_MODES = ("local", "median", "band")
+
+
+def band_nominal(curve, grating):
+    """True if the band's half-maximum range lies inside the grating's nominal range."""
+    lam, t = curve
+    on = lam[t >= 0.5 * t.max()]
+    lo, hi = NOMINAL_UM.get(grating, (np.nan, np.nan))
+    return bool(on.size and on.min() / 1e4 >= lo and on.max() / 1e4 <= hi)
+
+
+def spectrum_band_factors(spec, grating, phot_row, curves, a):
+    """S = photometry / synthetic photometry in every NIRCam band of one
+    spectrum. Returns (passing, rejected): passing is a list of dicts (band,
+    pivot, factor, factor_err, snr, cov, synth, phot), sorted by pivot, of the
+    bands inside the nominal range with coverage >= --min-coverage, S/N >=
+    --slit-snr-min in both fluxes and S inside --slit-range. rejected lists
+    'band reason' strings."""
     if spec is None:
-        return None, "no spectrum file"
+        return [], ["no spectrum file"]
     w, f, e = spec
-    cands, reasons = [], []
+    good, bad = [], []
     for filt in SLIT_FILTERS:
         fp, ep = phot_row.get(filt.lower(), np.nan), phot_row.get(f"{filt.lower()}_err", np.nan)
         if not (np.isfinite(fp) and np.isfinite(ep) and ep > 0):
             continue
         lam_f, t_f = curves[filt]
-        if t_at(curves[filt], lam_line) < 0.5 * t_f.max():
+        if not band_nominal(curves[filt], grating):
             continue
-        if not covered_mask(w, lam_line)[0]:
-            reasons.append(f"{filt} line not on spectrum")
+        with np.errstate(invalid="ignore", divide="ignore"):
+            fs, es, cov = synthetic_fnu(w, f, e, lam_f, t_f)
+        if not (np.isfinite(fs) and np.isfinite(es) and es > 0) or cov <= 0:
             continue
-        fs, es, cov = synthetic_fnu(w, f, e, lam_f, t_f)
         if cov < a.min_coverage:
-            reasons.append(f"{filt} coverage {cov:.2f}")
+            bad.append(f"{filt} coverage {cov:.2f}")
             continue
         if not (fs / es >= a.slit_snr_min and fp / ep >= a.slit_snr_min):
-            reasons.append(f"{filt} S/N synth {fs / es:.1f} phot {fp / ep:.1f}")
+            bad.append(f"{filt} S/N synth {fs / es:.1f} phot {fp / ep:.1f}")
             continue
         fac = fp / fs
         fac_e = fac * np.hypot(ep / fp, es / fs)
-        cands.append(dict(band=filt, factor=fac, factor_err=fac_e, snr=fac / fac_e,
-                          synth=fs, phot=fp, cov=cov))
-    if not cands:
-        return None, "; ".join(reasons) if reasons else "no band contains the line"
-    return min(cands, key=lambda c: (filter_rank(c["band"]), -c["snr"])), ""
+        if not (a.slit_range[0] <= fac <= a.slit_range[1]):
+            bad.append(f"{filt} S {fac:.2f} outside {a.slit_range[0]:g} to {a.slit_range[1]:g}")
+            continue
+        good.append(dict(band=filt, pivot=FILTERS[filt][1], factor=fac, factor_err=fac_e,
+                         snr=fac / fac_e, cov=cov, synth=fs, phot=fp))
+    return sorted(good, key=lambda d: d["pivot"]), bad
+
+
+def spec_median(bands):
+    """Median S of a spectrum's passing bands, with an error that is the
+    larger of the scatter between bands / sqrt(N) and the typical single-band
+    error. None if there are no bands."""
+    if not bands:
+        return None
+    v = np.array([b["factor"] for b in bands])
+    ev = np.array([b["factor_err"] for b in bands])
+    med = float(np.median(v))
+    scat = float(np.std(v, ddof=1) / np.sqrt(v.size)) if v.size > 1 else 0.0
+    err = max(scat, float(np.median(ev)))
+    return dict(band="+".join(b["band"] for b in bands), factor=med, factor_err=err,
+                snr=med / err if err > 0 else np.nan, n=v.size)
+
+
+def line_factor(bands, lam_line, curves, a):
+    """The slit factor for one line from its spectrum's passing bands, by
+    --slit-mode. Returns (dict with factor, factor_err, band, snr, source) or
+    (None, reason)."""
+    if not bands:
+        return None, "no band passes"
+    med = spec_median(bands)
+    if a.slit_mode == "median":
+        if med["n"] >= a.min_bands:
+            return dict(med, source="median"), ""
+        # too few bands for a median: fall through to the local choice
+    containing = [b for b in bands if t_at(curves[b["band"]], lam_line) >= 0.5 * curves[b["band"]][1].max()]
+    if containing:
+        best = min(containing, key=lambda b: (filter_rank(b["band"]), -b["snr"]))
+        return dict(best, source="line_band"), ""
+    if a.slit_mode == "band":
+        return None, "no passing band contains the line"
+    blue = [b for b in bands if b["pivot"] < lam_line]
+    red = [b for b in bands if b["pivot"] > lam_line]
+    if blue and red:
+        b1, b2 = blue[-1], red[0]
+        wgt = np.log(lam_line / b1["pivot"]) / np.log(b2["pivot"] / b1["pivot"])
+        lnS = (1 - wgt) * np.log(b1["factor"]) + wgt * np.log(b2["factor"])
+        S = float(np.exp(lnS))
+        Se = S * float(np.hypot((1 - wgt) * b1["factor_err"] / b1["factor"],
+                                wgt * b2["factor_err"] / b2["factor"]))
+        return dict(band=f"{b1['band']}+{b2['band']}", factor=S, factor_err=Se,
+                    snr=S / Se if Se > 0 else np.nan, source="interp"), ""
+    return dict(med, source="spec_median"), ""
 
 
 # ============================================================================
@@ -569,7 +691,7 @@ def main():
         print(f"  reading  {os.path.abspath(p_)}")
     print(f"  reading  {os.path.abspath(a.spec_root)}/<grating>_<filter>/<ID>_*_spectra_lime.fits")
     print(f"  reading  {os.path.abspath(a.filter_dir)}/JWST_NIRCam.<FILT>.dat")
-    for p_ in (a.out, a.out_npz, a.plot):
+    for p_ in (a.out, a.out_npz, a.bands_out, a.plot):
         print(f"  writing  {os.path.abspath(p_)}")
     print(f"  Halpha S/N >= {a.ha_snr_min:g}, Hbeta S/N >= {a.hb_snr_min:g}, "
           f"Balmer basis {a.balmer_basis}, k(Ha) {K_HA:.3f}, k(Hb) {K_HB:.3f} (Calzetti 2000), "
@@ -622,7 +744,7 @@ def main():
           + ("  (any [SII] in the band is counted as Halpha)" if a.sii_ha == 0 else ""))
 
     # ---------------------------------------------------------------- pass 1: slit factors
-    spec_cache, slit = {}, {}
+    spec_cache, slit, band_tab, spec_bands = {}, {}, [], {}
 
     def spec(sid, gr):
         k = (sid, gr)
@@ -643,15 +765,29 @@ def main():
             for gr, *_ in rows.get(sid, []):
                 if prow is None:
                     slit[(sid, line, gr)] = (None, "not in Isaac's catalogue")
-                elif flagged[sid] and not a.allow_flagged_phot:
+                    continue
+                if flagged[sid] and not a.allow_flagged_phot:
                     slit[(sid, line, gr)] = (None, f"photometry Flag {fl}")
-                else:
-                    d_, why_ = direct_slit_factor(spec(sid, gr), rest * (1 + z), prow, curves, a)
-                    if d_ is not None and not (a.slit_range[0] <= d_["factor"] <= a.slit_range[1]):
-                        why_ = (f"direct S {d_['factor']:.2f} in {d_['band']} outside "
-                                f"{a.slit_range[0]:g} to {a.slit_range[1]:g}")
-                        d_ = None
-                    slit[(sid, line, gr)] = (d_, why_)
+                    continue
+                if (sid, gr) not in spec_bands:
+                    good, bad = spectrum_band_factors(spec(sid, gr), gr, prow, curves, a)
+                    spec_bands[(sid, gr)] = (good, bad)
+                    for b in good:
+                        band_tab.append(dict(ID=sid, grating=gr, band=b["band"], pivot_um=b["pivot"] / 1e4,
+                                             S=b["factor"], S_err=b["factor_err"], coverage=b["cov"]))
+                good, bad = spec_bands[(sid, gr)]
+                d_, why_ = line_factor(good, rest * (1 + z), curves, a)
+                if d_ is None and bad:
+                    why_ = why_ + " (" + "; ".join(bad) + ")"
+                slit[(sid, line, gr)] = (d_, why_)
+    print(f"  slit mode {a.slit_mode}, band coverage >= {a.min_coverage:g}, S/N >= {a.slit_snr_min:g}, "
+          f"S in {a.slit_range[0]:g} to {a.slit_range[1]:g}"
+          + (f", median needs >= {a.min_bands} bands" if a.slit_mode == "median" else ""))
+    nb = np.array([len(g) for g, _ in spec_bands.values()])
+    if nb.size:
+        print(f"  spectra with passing bands: {nb.size} spectra, "
+              + ", ".join(f"{k} band{'s' if k != 1 else ''}: {int((nb == k).sum())}" for k in range(3))
+              + f", 3 or more: {int((nb >= 3).sum())}")
     med = {}
     for line in ("ha", "hb"):
         best = {}
@@ -663,19 +799,77 @@ def main():
             med[line] = (float(np.median(vals)), nmad(vals))
         else:
             med[line] = (np.nan, np.nan)
-        print(f"  {line} slit factors: {vals.size} sources with a direct factor"
+        kinds = pd.Series([d["source"] for d in best.values()]).value_counts().to_dict()
+        print(f"  {line} slit factors: {vals.size} sources with their own factor {kinds}"
               + (f", median {med[line][0]:.2f}, NMAD {med[line][1]:.2f}, 16-84th "
                  f"{np.percentile(vals, 16):.2f} to {np.percentile(vals, 84):.2f}, "
                  f"range {vals.min():.2f} to {vals.max():.2f}" if vals.size else ""))
 
+    # medians of the own factors of each line in each grating (fallback 2)
+    gmed = {}
+    for line in ("ha", "hb"):
+        for gr in GRATING_FILTER:
+            v = np.array([d["factor"] for (sid, ln, g), (d, _) in slit.items()
+                          if ln == line and g == gr and d is not None])
+            gmed[(line, gr)] = ((float(np.median(v)), nmad(v), v.size) if v.size >= a.min_grating
+                                else (np.nan, np.nan, v.size))
+    if a.fallback == "grating":
+        print(f"  fallback medians by grating (need >= {a.min_grating} own factors):")
+        for line in ("ha", "hb"):
+            print(f"    {line}: " + ", ".join(
+                f"{gr} {m:.2f} +/- {e:.2f} ({k})" if np.isfinite(m) else f"{gr} not used ({k})"
+                for gr, (m, e, k) in ((g, gmed[(line, g)]) for g in GRATING_FILTER)))
+
+    # spectrum medians of every grating of a source (fallback 1), filled on demand
+    def other_grating_bands(sid, gr):
+        prow = isaac.loc[sid] if sid in isaac.index else None
+        if prow is None or (flagged.get(sid, False) and not a.allow_flagged_phot):
+            return []
+        out_ = []
+        for g in GRATING_FILTER:
+            if g == gr:
+                continue
+            if (sid, g) not in spec_bands:
+                spec_bands[(sid, g)] = spectrum_band_factors(spec(sid, g), g, prow, curves, a)
+            good = spec_bands[(sid, g)][0]
+            if good:
+                out_.append((g, good))
+        return out_
+
+    # scatter between two gratings of one source, from sources with factors in both
+    rat = []
+    for sid in {k[0] for k in spec_bands}:
+        meds = [spec_median(spec_bands[(sid, g)][0]) for g in GRATING_FILTER if (sid, g) in spec_bands]
+        meds = [m_["factor"] for m_ in meds if m_]
+        if len(meds) >= 2:
+            rat.append(np.log(meds[1] / meds[0]))
+    cross_err = (float(nmad(np.array(rat))) if len(rat) >= 5 else a.cross_grating_err)
+    if a.fallback == "grating":
+        print(f"  scatter between two gratings of one source: {100 * cross_err:.0f} per cent "
+              + (f"(NMAD of ln ratio, {len(rat)} sources)" if len(rat) >= 5 else "(--cross-grating-err)"))
+
     def factor(sid, line, gr):
         d, why = slit.get((sid, line, gr), (None, "no line"))
         if d is not None:
-            return d["factor"], d["factor_err"], d["band"], "direct", ""
+            return d["factor"], d["factor_err"], d["band"], d["source"], ""
+        if a.fallback == "grating":
+            og = other_grating_bands(sid, gr)
+            if og:
+                g, good = max(og, key=lambda t: len(t[1]))
+                m_ = spec_median(good)
+                e_ = float(np.hypot(m_["factor_err"], cross_err * m_["factor"]))
+                return m_["factor"], e_, f"{g}:{m_['band']}", "other_grating", why
+            m, e, _ = gmed.get((line, gr), (np.nan, np.nan, 0))
+            if np.isfinite(m):
+                return m, e, "", "grating_median", why
         m, e = med[line]
         if np.isfinite(m):
             return m, e, "", "sample_median", why
         return np.nan, np.nan, "", "none", why
+
+    def spec_med(sid, gr):
+        m = spec_median(spec_bands.get((sid, gr), ([], []))[0])
+        return (m["factor"], m["n"]) if m else (np.nan, 0)
 
     def pick(rows, sid, line):
         """Best spectrum for a line: a direct slit factor first, then S/N."""
@@ -729,9 +923,11 @@ def main():
         if best_ha is not None:
             gr, f, e, snr = best_ha
             S, Se, band, src, why = factor(sid, "ha", gr)
+            smed, nband = spec_med(sid, gr)
             r.update(ha_grating=gr, ha_flux_obs=f, ha_flux_obs_err=e, ha_snr=snr,
                      ha_slit_factor=S, ha_slit_factor_err=Se, ha_slit_band=band,
-                     ha_slit_source=src, ha_slit_note=why)
+                     ha_slit_source=src, ha_slit_note=why, ha_slit_spec_median=smed,
+                     ha_slit_nbands=nband)
             if np.isfinite(S):
                 d_f = rng.normal(f, e, n)
                 d_S = pos_normal(S, Se, n, rng)
@@ -852,6 +1048,7 @@ def main():
     cols = ["ID", "z_sys", "ha_case", "ha_source", "dust_method", "balmer_spectra", "ha_reason",
             "ha_grating", "ha_flux_obs", "ha_flux_obs_err", "ha_snr", "ha_slit_factor",
             "ha_slit_factor_err", "ha_slit_band", "ha_slit_source", "ha_slit_note",
+            "ha_slit_spec_median", "ha_slit_nbands",
             "hb_grating", "hb_flux_obs", "hb_flux_obs_err", "hb_snr", "hb_slit_factor",
             "hb_slit_factor_err", "hb_slit_band", "hb_slit_source", "balmer_ha_grating",
             "balmer_ratio", "balmer_ratio_err_lo", "balmer_ratio_err_hi", "balmer_ratio_obs",
@@ -867,14 +1064,17 @@ def main():
     out = out.reindex(columns=cols)
 
     report(out, a, nii)
-    for p_ in (a.out, a.out_npz, a.plot):
+    for p_ in (a.out, a.out_npz, a.bands_out, a.plot):
         os.makedirs(os.path.dirname(os.path.abspath(p_)), exist_ok=True)
     out.to_csv(a.out, index=False)
+    pd.DataFrame(band_tab, columns=["ID", "grating", "band", "pivot_um", "S", "S_err", "coverage"]
+                 ).to_csv(a.bands_out, index=False)
     np.savez(a.out_npz, ID=out["ID"].to_numpy(int), ha_flux_corr=np.array(draws_corr),
              ha_flux_corr_sed=np.array(draws_sed))
     diagnostic_plot(out, a.plot)
     print(f"\nWrote  {os.path.abspath(a.out)}")
     print(f"Wrote  {os.path.abspath(a.out_npz)}")
+    print(f"Wrote  {os.path.abspath(a.bands_out)}")
     print(f"Wrote  {os.path.abspath(a.plot)}")
 
 
@@ -903,10 +1103,24 @@ def report(out, a, nii):
         mm = m & (o["balmer_spectra"] == b)
         print(f"      case 1, Balmer from {b:<10s}          {int(mm.sum()):>4d} "
               f"{int((mm & ana).sum()):>12d} {int((mm & det).sum()):>9d}")
-    for src in ("direct", "sample_median"):
+    labels = {"line_band": "band containing the line", "interp": "interpolated, bands either side",
+              "spec_median": "spectrum median", "median": "median of all bands",
+              "other_grating": "same source, other grating",
+              "grating_median": "median of its grating", "sample_median": "sample median"}
+    for src, lab in labels.items():
         mm = (o["ha_source"] == "spec") & (o["ha_slit_source"] == src)
-        print(f"      spec Halpha with a {src:<14s} slit factor {int(mm.sum()):>3d} "
-              f"({int((mm & det).sum())} Lya det)")
+        if mm.any():
+            print(f"      spec Halpha, S from {lab:<32s} {int(mm.sum()):>3d} "
+                  f"({int((mm & det).sum())} Lya det)")
+    own = o[o["ha_slit_source"].isin(DIRECT_SOURCES) & (o["ha_slit_nbands"] >= 2)]
+    if len(own):
+        q = own["ha_slit_factor"] / own["ha_slit_spec_median"]
+        print(f"      S used / spectrum median, {len(own)} spectra with >= 2 bands: median {q.median():.2f}, "
+              f"16-84th {q.quantile(.16):.2f} to {q.quantile(.84):.2f}")
+        off = own[(q > 1.3) | (q < 1 / 1.3)]
+        for i, r in off.iterrows():
+            print(f"        {i:>6d}  S {r['ha_slit_factor']:.2f} ({r['ha_slit_source']}, {r['ha_slit_band']}) "
+                  f"but spectrum median {r['ha_slit_spec_median']:.2f} from {int(r['ha_slit_nbands'])} bands")
 
     none_det = o[(o["ha_case"] == 0) & det]
     if len(none_det):
@@ -914,15 +1128,26 @@ def report(out, a, nii):
         for i, r in none_det.iterrows():
             print(f"    {i:>6d}  z {r['z_sys']:.3f}  {r['ha_reason']}")
 
-    big = o[(o["ha_slit_source"] == "direct") & ((o["ha_slit_factor"] > 3) | (o["ha_slit_factor"] < 0.7))]
+    big = o[o["ha_slit_source"].isin(DIRECT_SOURCES) & ((o["ha_slit_factor"] > 3) | (o["ha_slit_factor"] < 0.7))]
     if len(big):
         print(f"\n  Halpha slit factors above 3 or below 0.7 ({len(big)}), worth a look")
         for i, r in big.sort_values("ha_slit_factor").iterrows():
             print(f"    {i:>6d}  {r['ha_grating']}  S {r['ha_slit_factor']:.2f} +/- "
                   f"{r['ha_slit_factor_err']:.2f} in {r['ha_slit_band']}")
-    for g, grp in o[o["ha_slit_source"] == "direct"].groupby("ha_grating"):
-        print(f"    median Halpha slit factor in {g}: {grp['ha_slit_factor'].median():.2f} "
-              f"({len(grp)} sources)")
+    own_ha = o[(o["ha_source"] == "spec") & o["ha_slit_source"].isin(DIRECT_SOURCES)]
+    for sub, lab in ((own_ha, "all"), (own_ha[ana.reindex(own_ha.index).fillna(False)], "in analysis")):
+        if len(sub) < 3:
+            continue
+        S = sub["ha_slit_factor"].to_numpy(float)
+        print(f"\n  Halpha slit factors by grating, own factors, {lab}: whole sample median {np.median(S):.2f}, "
+              f"NMAD {nmad(S):.2f} ({100 * nmad(S) / np.median(S):.0f} per cent)")
+        for g, grp in sub.groupby("ha_grating"):
+            s = grp["ha_slit_factor"].to_numpy(float)
+            print(f"    {g}: median {np.median(s):.2f}, NMAD {nmad(s):.2f} "
+                  f"({100 * nmad(s) / np.median(s):.0f} per cent), N {s.size}")
+        rel = sub["ha_slit_factor"] / sub["ha_grating"].map(sub.groupby("ha_grating")["ha_slit_factor"].median())
+        print(f"    scatter about each grating's own median: {100 * nmad(rel.to_numpy(float)):.0f} per cent "
+              f"(compare the whole-sample figure above)")
 
     b = o[(o["balmer_spectra"] == "same") & o["balmer_ratio_obs"].notna()
           & o["balmer_ratio_slitcorr"].notna()]
@@ -969,7 +1194,7 @@ def diagnostic_plot(out, path):
                          "xtick.direction": "in", "ytick.direction": "in",
                          "xtick.top": True, "ytick.right": True})
     fig, ax = plt.subplots(2, 2, figsize=(7.09, 6.0))
-    d = out[out["ha_slit_source"] == "direct"]
+    d = out[out["ha_slit_source"].isin(DIRECT_SOURCES)]
     v = d["ha_slit_factor"].to_numpy(float)
     if v.size:
         ax[0, 0].hist(v, bins=np.linspace(0, max(4, np.nanmax(v) * 1.05), 25), color="#8c4a8c",
@@ -977,7 +1202,7 @@ def diagnostic_plot(out, path):
         ax[0, 0].axvline(np.median(v), color="k", ls="--", lw=0.8)
     ax[0, 0].set_xlabel(r"H$\alpha$ slit factor $S$")
     ax[0, 0].set_ylabel("N")
-    ax[0, 0].set_title(f"direct factors, N = {v.size}", fontsize=8)
+    ax[0, 0].set_title(f"own factors (not the sample median), N = {v.size}", fontsize=8)
 
     c = out[out["a_ha_balmer"].notna() & out["a_ha_sed"].notna()]
     a_ = ax[0, 1]

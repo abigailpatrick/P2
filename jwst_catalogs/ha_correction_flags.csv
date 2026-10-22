@@ -2,34 +2,33 @@ ID,z_sys,lya_det,in_analysis,ha_case,n_issues,issues
 18264,5.519616808174633,0,1,2,1,chromatic G235M max/min S 3.01 over 2 bands
 19338,5.861944857033178,0,1,2,1,chromatic G235M max/min S 1.53 over 4 bands
 19796,5.505161909504364,0,1,1,3,slit_median (photometry Flag 561) | chromatic G235M max/min S 2.05 over 3 bands | chromatic G395M max/min S 2.32 over 4 bands
-19865,3.0939518028919544,0,1,2,4,"slit_out S_Ha 3.50 in F277W | grating S G395/G235 1.76 (2.22, 3.90) | chromatic G235H max/min S 2.15 over 2 bands | chromatic G235M max/min S 1.68 over 4 bands"
+19865,3.0939518028919544,0,1,2,3,"grating S G395/G235 1.76 (2.22, 3.90) | chromatic G235H max/min S 2.15 over 2 bands | chromatic G235M max/min S 1.68 over 4 bands"
 21375,3.3746292072846584,1,1,1,1,chromatic G235H max/min S 2.63 over 4 bands
-39369,2.939637713570391,0,1,2,1,slit_median (F250M S/N synth -11.3 phot 20.0; F277W S/N synth -26.2 phot 20.0)
+39369,2.939637713570391,0,1,2,1,slit_median (no band passes (F182M S/N synth 2.1 phot 20.0; F200W S/N synth -4.8 phot 20.0; F210M S/N synth -8.0 phot 20.0; F250M S/N synth -11.3 phot 20.0))
 40310,2.9074170391864365,1,1,1,1,chromatic G395H max/min S 1.66 over 4 bands
-48238,2.96159296875027,1,1,2,1,slit_median (F277W coverage 0.65)
+48238,2.96159296875027,1,1,2,1,slit_median (no band passes (F182M S/N synth -1.7 phot 20.0; F200W coverage 0.87; F210M coverage 0.73; F250M S 0.29 outside 0.5 to 5))
 50803,3.002653723245896,0,1,2,1,"grating S G395/G235 0.59 (1.48, 0.87)"
 51988,2.917230580108488,1,1,1,2,"grating S G395/G235 0.58 (1.33, 0.77) | chromatic G235H max/min S 1.52 over 4 bands"
 52789,3.2065311965537218,0,1,1,2,dust_offset Balmer 3.40 SED 1.01 (3.5 sigma) | fesc_dust Balmer/SED 0.11
 53122,4.480689354347367,1,1,2,2,slit_out S_Ha 0.59 in F360M | phot_spec 2.68 in F360M
 53171,3.1888742802184016,1,1,1,2,dust_offset Balmer 3.21 SED 1.14 (3.3 sigma) | fesc_dust Balmer/SED 0.15
-53417,3.7549055950217873,1,1,1,1,slit_median (F277W coverage 0.25; F300M coverage 0.68)
+53417,3.7549055950217873,1,1,1,2,slit_median (no band passes (F356W S/N synth 2.5 phot 20.0; F360M S/N synth 0.5 phot 18.1; F410M S/N synth -0.2 phot 17.6; F444W coverage 0.41)) | fesc_dust Balmer/SED 0.19
 54019,3.3738869505508218,1,1,3,1,chromatic G235H max/min S 1.64 over 4 bands
 54317,3.385708375952321,1,1,1,1,chromatic G235H max/min S 1.73 over 3 bands
 54890,4.038840229429802,1,1,2,1,phot_spec 2.39 in F356W
-55001,3.324934328607742,1,1,2,1,slit_median (direct S 0.01 in F277W outside 0.5 to 5)
-55120,2.9871512569189225,0,1,1,2,slit_out S_Ha 3.51 in F277W | chromatic G395M max/min S 1.63 over 5 bands
-55154,4.39169880860481,0,1,2,1,slit_median (F356W S/N synth 2.2 phot 20.0; F360M S/N synth 2.8 phot 20.0)
+55001,3.324934328607742,1,1,2,1,slit_median (no band passes (F182M S/N synth -3.5 phot 8.7; F200W coverage 0.87; F210M coverage 0.71; F250M S 0.01 outside 0.5 to 5))
+55120,2.9871512569189225,0,1,1,1,chromatic G395M max/min S 1.63 over 5 bands
+55154,4.39169880860481,0,1,2,1,slit_median (no band passes (F356W coverage 0.87; F360M S/N synth 2.8 phot 20.0; F410M S/N synth 0.9 phot 20.0; F444W S/N synth -1.8 phot 20.0; F460M S/N synth -6.7 phot 14.4))
 55296,3.231877231232306,0,1,1,2,"grating S G395/G235 1.69 (1.37, 2.31) | chromatic G395H max/min S 1.69 over 3 bands"
-55366,3.755652203751653,1,1,2,1,slit_median (F277W coverage 0.37; F300M S/N synth 0.4 phot 20.0)
-55579,3.155440389506756,0,1,1,1,fesc_dust Balmer/SED 0.19
+55366,3.755652203751653,1,1,2,1,slit_median (no band passes (F356W S/N synth -0.1 phot 20.0; F360M S/N synth -0.4 phot 19.5; F410M coverage 0.58; F444W coverage 0.25))
+55579,3.155440389506756,0,1,1,2,slit_out S_Ha 3.70 in F182M+F200W+F210M | fesc_dust Balmer/SED 0.19
 55850,3.5194870316519564,1,1,1,1,chromatic G235H max/min S 1.90 over 4 bands
-57124,4.388783382999313,1,1,1,1,slit_median (F356W S/N synth -2.4 phot 20.0; F360M S/N synth -1.5 phot 20.0)
+57124,4.388783382999313,1,1,1,1,slit_median (no band passes (F356W coverage 0.87; F360M coverage 0.72; F410M S/N synth -7.1 phot 9.2; F444W S/N synth -11.5 phot 12.5; F460M S/N synth -4.1 phot 2.1))
 58451,2.9618323970369014,1,1,1,4,"balmer_low R 2.47 +0.17 | grating S G395/G235 0.66 (1.28, 0.85) | chromatic G235M max/min S 2.19 over 4 bands | chromatic G395M max/min S 2.92 over 4 bands"
-59307,3.463678352620841,0,1,2,1,phot_spec 2.42 in F300M
-59323,3.715756449643688,1,1,1,1,fesc_dust Balmer/SED 0.18
-60480,2.9917623973402123,0,1,1,1,slit_median (F277W coverage 0.69)
-60484,4.522095783049019,1,1,1,1,slit_median (direct S 0.34 in F360M outside 0.5 to 5)
+59307,3.463678352620841,0,1,2,1,phot_spec 2.47 in F300M
+59853,3.719008802295349,0,1,1,1,slit_median (no band passes (F356W coverage 0.87; F360M coverage 0.74; F410M S/N synth -8.2 phot 20.0; F444W S/N synth -5.5 phot 20.0; F460M S/N synth 0.5 phot 20.0))
+60484,4.522095783049019,1,1,1,1,slit_median (no band passes (F356W coverage 0.87; F360M S 0.34 outside 0.5 to 5; F410M S/N synth -1.4 phot 7.1; F444W coverage 0.87; F460M S/N synth -2.8 phot 4.5))
 60600,3.417196118926792,1,1,2,1,chromatic G235M max/min S 1.85 over 3 bands
 61434,2.913001146078645,1,1,1,1,chromatic G235H max/min S 5.38 over 3 bands
 61549,2.916704276514041,0,1,1,1,slit_out S_Ha 0.66 in F250M
-67456,3.5359272404107607,1,1,1,3,slit_out S_Ha 4.35 in F300M | phot_spec 0.33 in F300M | chromatic G235H max/min S 1.57 over 3 bands
+67456,3.5359272404107607,1,1,1,3,slit_out S_Ha 4.42 in F210M+F250M | phot_spec 0.32 in F300M | chromatic G235H max/min S 1.57 over 3 bands

@@ -90,6 +90,9 @@ Inputs
 
 Outputs
 -------
+  plots/ha_checks/slit_summary.png        S used against z by grating, and photometric /
+                                          slit-corrected spectral Halpha in dex (the one-figure check)
+  plots/ha_checks/dust_balmer_vs_sed.png  A_Ha and f_esc, Balmer against SED, case 1, with offsets
   plots/ha_checks/slit_factors.png, balmer_dust.png, ha_phot_vs_spec.png, fesc_checks.png
   jwst_catalogs/ha_slit_factors_all_bands.csv
   jwst_catalogs/ha_correction_flags.csv
@@ -120,6 +123,10 @@ from fit_muv_beta import FILTERS, load_isaac    # noqa: E402
 
 CAT_DIR = f"{pc.P2_ROOT}/jwst_catalogs"
 REF_UM = 3.0       # common wavelength for comparing gratings
+# slit_source values that are a source's own factor (not the sample median);
+# "direct" is the label of older ha_flux_corrections.csv files
+OWN_S = ("line_band", "interp", "spec_median", "median", "direct")
+FALLBACK_S = ("other_grating", "grating_median", "sample_median")
 GR_COL = {"G235": "#2a9d8f", "G395": "#e07a1f"}
 CASE_COL = {1: "#2a9d8f", 2: "#3b6fb6", 3: "#e39b3b", 0: "0.6"}
 BAND_COL = dict(zip(bh.SLIT_FILTERS, plt.cm.viridis(np.linspace(0, 0.95, len(bh.SLIT_FILTERS)))))
@@ -142,6 +149,8 @@ def parse_args():
     p.add_argument("--reuse-bands", action="store_true",
                    help="read --bands-csv instead of recomputing it from the spectra")
     p.add_argument("--bands-csv", default=f"{CAT_DIR}/ha_slit_factors_all_bands.csv")
+    p.add_argument("--slit-bands-csv", default=f"{CAT_DIR}/ha_slit_bands.csv",
+                   help="the bands build_ha_flux_corrections.py used, for the band-to-band scatter")
     p.add_argument("--flags-csv", default=f"{CAT_DIR}/ha_correction_flags.csv")
     p.add_argument("--outdir", default=f"{pc.P2_ROOT}/plots/ha_checks")
     return p.parse_args()
@@ -361,7 +370,7 @@ def fig_slit(d, b, sp, path):
     a_.set_title(f"(c) spectra with >= 2 nominal bands, N = {v.size}", fontsize=8)
 
     # d, e: S used for Halpha
-    u = d[d["ha_slit_source"] == "direct"]
+    u = d[d["ha_slit_source"].isin(OWN_S)]
     tc = b.drop_duplicates("ID").set_index("ID")["total_correction"]
     a_ = ax[3]
     for gf, col in GR_COL.items():
@@ -371,7 +380,7 @@ def fig_slit(d, b, sp, path):
     rho_text(a_, tc.reindex(u["ID"]).to_numpy(float), u["ha_slit_factor"])
     a_.set_xlabel("Isaac total_correction")
     a_.set_ylabel(r"$S_{\rm H\alpha}$ used")
-    a_.set_title(r"(d) direct H$\alpha$ factors", fontsize=8)
+    a_.set_title(r"(d) own H$\alpha$ factors", fontsize=8)
     a_.legend(frameon=False, fontsize=6, loc="lower right")
 
     a_ = ax[4]
@@ -379,9 +388,9 @@ def fig_slit(d, b, sp, path):
         g = u[u["ha_grating"].map(gfam) == gf]
         pts(a_, g["z_sys"], g["ha_slit_factor"], g["det"], col,
             yerr=num(g, "ha_slit_factor_err").to_numpy(float), label=gf)
-    med = d[d["ha_slit_source"] == "sample_median"]
+    med = d[d["ha_slit_source"].isin(FALLBACK_S)]
     a_.plot(med["z_sys"], med["ha_slit_factor"], "x", color="0.4", ms=5,
-            label=f"sample median ({len(med)})")
+            label=f"fallback, no own factor ({len(med)})")
     a_.set_xlabel(r"$z_{\rm sys}$")
     a_.set_ylabel(r"$S_{\rm H\alpha}$ used")
     a_.legend(frameon=False, fontsize=6)
@@ -389,8 +398,8 @@ def fig_slit(d, b, sp, path):
 
     # f: Hbeta against Halpha factor in one spectrum
     a_ = ax[5]
-    s = d[(d["balmer_spectra"] == "same") & (d["ha_slit_source"] == "direct")
-          & (d.get("hb_slit_source", pd.Series("", index=d.index)) == "direct")]
+    s = d[(d["balmer_spectra"] == "same") & d["ha_slit_source"].isin(OWN_S)
+          & d.get("hb_slit_source", pd.Series("", index=d.index)).isin(OWN_S)]
     if len(s):
         pts(a_, s["ha_slit_factor"], s["hb_slit_factor"], s["det"], "#2a9d8f",
             xerr=num(s, "ha_slit_factor_err").to_numpy(float),
@@ -557,9 +566,9 @@ def fig_phot(d, path):
             logy(a_)
             a_.set_ylim(min(0.3, np.nanmin(g["ratio"].clip(lower=0.05)) / 1.3),
                         max(3.5, np.nanmax(g["ratio"]) * 1.3))
-    mm = g[g["ha_slit_source"] == "sample_median"] if len(g) else g
+    mm = g[g["ha_slit_source"].isin(FALLBACK_S)] if len(g) else g
     if len(mm):
-        ax[1].plot(mm["ha_slit_factor"], mm["ratio"], "x", color="0.3", ms=6, label="sample-median S")
+        ax[1].plot(mm["ha_slit_factor"], mm["ratio"], "x", color="0.3", ms=6, label="fallback S")
         ax[1].legend(frameon=False, fontsize=6)
     det_legend(ax[2])
     ax[2].legend(frameon=False, fontsize=6, loc="lower right")
@@ -638,6 +647,175 @@ def fig_fesc(d, path):
     plt.close(fig)
 
 
+
+# ============================================================================
+# Two summary figures with headline numbers
+# ============================================================================
+
+GRATING_STYLE = {"G235M": ("#2a9d8f", "G235M"), "G235H": ("#1d6b61", "G235H"),
+                 "G395M": ("#e07a1f", "G395M"), "G395H": ("#a8540f", "G395H")}
+SRC_MARK = {"line_band": "o", "interp": "D", "spec_median": "s", "median": "s", "direct": "o",
+            "other_grating": "^"}
+
+
+def dex_stats(x):
+    x = np.asarray(x, float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return dict(N=0, med=np.nan, p16=np.nan, p84=np.nan, nmad=np.nan)
+    return dict(N=int(x.size), med=float(np.median(x)), p16=float(np.percentile(x, 16)),
+                p84=float(np.percentile(x, 84)), nmad=bh.nmad(x))
+
+
+def fig_slit_summary(d, path, slit_bands):
+    """One figure for 'are the slit corrections consistent?': S used against z
+    by grating, and the end-to-end test, photometric over slit-corrected
+    spectral Halpha, in dex. Returns the numbers it prints."""
+    sp = d[d["ha_source"] == "spec"].copy()
+    own = sp[sp["ha_slit_source"].isin(OWN_S)]
+    med_all = float(np.median(own["ha_slit_factor"])) if len(own) else np.nan
+    fig, ax = plt.subplots(1, 2, figsize=(7.2, 3.6))
+    a_ = ax[0]
+    lines = []
+    for g, (col, lab) in GRATING_STYLE.items():
+        gg = sp[sp["ha_grating"] == g]
+        if not len(gg):
+            continue
+        for src, mk in SRC_MARK.items():
+            m = gg["ha_slit_source"] == src
+            if m.any():
+                pts(a_, gg.loc[m, "z_sys"], gg.loc[m, "ha_slit_factor"], gg.loc[m, "det"], col, mk=mk,
+                    yerr=num(gg[m], "ha_slit_factor_err").to_numpy(float))
+        sm = gg["ha_slit_source"].isin(("grating_median", "sample_median"))
+        a_.plot(gg.loc[sm, "z_sys"], gg.loc[sm, "ha_slit_factor"], "x", color=col, ms=5)
+        go = gg[gg["ha_slit_source"].isin(OWN_S)]["ha_slit_factor"].to_numpy(float)
+        if go.size:
+            lines.append(f"{lab}: {np.median(go):.2f}, NMAD {bh.nmad(go):.2f} "
+                         f"({100 * bh.nmad(go) / np.median(go):.0f} per cent, N {go.size})")
+            a_.plot([], [], "o", color=col, label=f"{lab}  median {np.median(go):.2f}, N = {go.size}")
+    if np.isfinite(med_all):
+        a_.axhline(med_all, color="k", ls="--", lw=0.8)
+    a_.axhline(1, color="k", ls=":", lw=0.6)
+    for lab, mk in (("band containing the line", "o"), ("interpolated", "D"),
+                    ("spectrum median", "s"), ("same source, other grating", "^"),
+                    ("grating or sample median", "x")):
+        a_.plot([], [], mk, color="0.45", mfc="0.45" if mk != "x" else None, ms=4, label=lab)
+    a_.set_yscale("log")
+    a_.set_yticks([0.5, 1, 2, 3, 5])
+    a_.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    a_.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    a_.set_xlabel(r"$z_{\rm sys}$")
+    a_.set_ylabel(r"slit factor $S_{\rm H\alpha}$")
+    a_.legend(frameon=False, fontsize=5.5, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2)
+    a_.set_title(f"(a) S used, median {med_all:.2f} (dashed), NMAD "
+                 f"{bh.nmad(own['ha_slit_factor'].to_numpy(float)):.2f}", fontsize=7.5)
+    # b: end-to-end
+    a_ = ax[1]
+    g = phot_spec(d)
+    r = np.log10(g["ratio"].clip(lower=1e-3).to_numpy(float))
+    st = dex_stats(r)
+    if st["N"]:
+        bins = np.arange(-1.0, 1.05, 0.1)
+        a_.hist(np.clip(r, -0.99, 0.99), bins=bins, color="#8c4a8c", edgecolor="k", lw=0.5)
+        a_.axvline(0, color="k", ls=":", lw=0.8)
+        a_.axvline(st["med"], color="k", ls="--", lw=0.9)
+    a_.set_xticks([-1, -0.5, 0, 0.5, 1])
+    a_.set_xlabel(r"$\log_{10}$ (photometric / slit-corrected spectral H$\alpha$)")
+    a_.set_ylabel("N")
+    a_.set_title(f"(b) median {st['med']:+.2f} dex, NMAD {st['nmad']:.2f} dex, N = {st['N']}", fontsize=7.5)
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+    # numbers
+    print("\n  SLIT-LOSS CONSISTENCY")
+    print(f"    S used for Halpha: {len(own)} own factors, median {med_all:.2f}, NMAD "
+          f"{bh.nmad(own['ha_slit_factor'].to_numpy(float)):.2f}; "
+          + ", ".join(f"{int((sp['ha_slit_source'] == k).sum())} {k}" for k in FALLBACK_S))
+    print("    by grating: " + "; ".join(lines))
+    if len(own):
+        rel = own["ha_slit_factor"] / own["ha_grating"].map(own.groupby("ha_grating")["ha_slit_factor"].median())
+        print(f"    scatter of S about its own grating's median: {100 * bh.nmad(rel.to_numpy(float)):.0f} per cent, "
+              f"whole sample {100 * bh.nmad(own['ha_slit_factor'].to_numpy(float)) / med_all:.0f} per cent")
+    if slit_bands is not None and len(slit_bands):
+        frac = []
+        for _, gg in slit_bands[slit_bands["ID"].isin(d["ID"])].groupby(["ID", "grating"]):
+            if len(gg) >= 2:
+                frac.append(bh.nmad(gg["S"].to_numpy(float)) / np.median(gg["S"]))
+        if frac:
+            print(f"    band-to-band scatter of S within one spectrum: median {100 * np.median(frac):.0f} per cent "
+                  f"({len(frac)} spectra with >= 2 bands)")
+    print(f"    photometric / slit-corrected spectral Halpha: median {st['med']:+.2f} dex "
+          f"(x{10 ** st['med']:.2f}), 16-84th {st['p16']:+.2f} to {st['p84']:+.2f} dex, "
+          f"NMAD {st['nmad']:.2f} dex, N = {st['N']}")
+    return st
+
+
+def fig_dust_compare(d, path):
+    """A_Ha and f_esc with Balmer against SED dust for case 1, and the offsets."""
+    c1 = d[(d["ha_case"] == 1) & d["a_ha_balmer"].notna() & d["a_ha_sed"].notna()].copy()
+    c1["dA"] = num(c1, "a_ha_balmer") - num(c1, "a_ha_sed")
+    fe, fs = num(c1, "fesc_lya"), num(c1, "fesc_lya_sed")
+    lim = num(c1, "fesc_lya_is_limit") == 1
+    c1["dlogf"] = np.log10(fe / fs)
+    fig, ax = plt.subplots(1, 2, figsize=(7.2, 3.2))
+    a_ = ax[0]
+    pts(a_, c1["a_ha_sed"], c1["a_ha_balmer"], c1["det"], "#2a9d8f", xerr=e2(c1, "a_ha_sed"),
+        yerr=e2(c1, "a_ha_balmer"))
+    top = max(1.5, float(np.nanmax(np.r_[1.5, c1["a_ha_balmer"], c1["a_ha_sed"]])) * 1.08)
+    a_.plot([0, top], [0, top], "k--", lw=0.8)
+    sa = dex_stats(c1["dA"])
+    sad = dex_stats(c1.loc[c1["det"], "dA"])
+    a_.set_xlim(-0.05, top)
+    a_.set_ylim(-0.05, top)
+    a_.set_xlabel(r"$A_{\rm H\alpha}$ SED [mag]")
+    a_.set_ylabel(r"$A_{\rm H\alpha}$ Balmer decrement [mag]")
+    a_.set_title(f"(a) Balmer $-$ SED: median {sa['med']:+.2f} mag, NMAD {sa['nmad']:.2f} (N = {sa['N']})",
+                 fontsize=7.5)
+    det_legend(a_)
+    a_.legend(frameon=False, fontsize=6, loc="upper left")
+    a_ = ax[1]
+    ok = fe.notna() & fs.notna() & (fe > 0) & (fs > 0)
+    m = ok & ~lim
+    pts(a_, fs[m], fe[m], c1.loc[m, "det"], "#2a9d8f", xerr=e2(c1[m], "fesc_lya_sed"),
+        yerr=e2(c1[m], "fesc_lya"))
+    a_.scatter(fs[ok & lim], fe[ok & lim], marker="v", facecolors="white", edgecolors="#2a9d8f", s=14,
+               label="5$\\sigma$ limits")
+    sf = dex_stats(c1.loc[m, "dlogf"])
+    if ok.any():
+        v = np.r_[fe[ok], fs[ok]]
+        lo_, hi_ = v.min() / 2, max(1.0, v.max() * 2)
+        a_.plot([lo_, hi_], [lo_, hi_], "k--", lw=0.8)
+        if np.isfinite(sf["med"]):
+            a_.plot([lo_, hi_], [lo_ * 10 ** sf["med"], hi_ * 10 ** sf["med"]], color="0.4", lw=0.8, ls=":",
+                    label=f"median offset {sf['med']:+.2f} dex")
+        a_.set_xlim(lo_, hi_)
+        a_.set_ylim(lo_, hi_)
+    a_.set_xscale("log")
+    a_.set_yscale("log")
+    a_.set_xlabel(r"$f_{\rm esc}^{\rm Ly\alpha}$ with SED $A_{\rm H\alpha}$")
+    a_.set_ylabel(r"$f_{\rm esc}^{\rm Ly\alpha}$ with Balmer $A_{\rm H\alpha}$")
+    a_.set_title(rf"(b) Ly$\alpha$ detections: median {sf['med']:+.2f} dex, NMAD {sf['nmad']:.2f} (N = {sf['N']})",
+                 fontsize=7.5)
+    a_.legend(frameon=False, fontsize=6, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+    print("\n  BALMER AGAINST SED DUST (case 1)")
+    print(f"    A_Ha Balmer - SED, all case 1: median {sa['med']:+.2f} mag, 16-84th {sa['p16']:+.2f} to "
+          f"{sa['p84']:+.2f}, NMAD {sa['nmad']:.2f}, N = {sa['N']}")
+    print(f"    A_Ha Balmer - SED, Lya detections: median {sad['med']:+.2f} mag, NMAD {sad['nmad']:.2f}, N = {sad['N']}")
+    for bs in ("same", "different"):
+        x = dex_stats(c1.loc[c1["balmer_spectra"] == bs, "dA"])
+        if x["N"]:
+            print(f"      {bs:<10s} spectrum: median {x['med']:+.2f} mag, N = {x['N']}")
+    print(f"    log10 f_esc(Balmer) - log10 f_esc(SED), Lya detections: median {sf['med']:+.2f} dex "
+          f"(x{10 ** sf['med']:.2f}), 16-84th {sf['p16']:+.2f} to {sf['p84']:+.2f} dex, NMAD {sf['nmad']:.2f}, "
+          f"N = {sf['N']}")
+    print("    (per source the f_esc offset is exactly -0.4 x the A_Ha offset, as only the dust differs)")
+    return sa, sf
+
 # ============================================================================
 # Flags and summary
 # ============================================================================
@@ -656,11 +834,11 @@ def flags(d, b, sp, a):
     for _, r in d.iterrows():
         i = r["ID"]
         S = fv(r, "ha_slit_factor")
-        if r.get("ha_slit_source") == "direct" and np.isfinite(S) and not (lo <= S <= hi):
+        if r.get("ha_slit_source") in OWN_S and np.isfinite(S) and not (lo <= S <= hi):
             issues[i].append(f"slit_out S_Ha {S:.2f} in {r.get('ha_slit_band')}")
-        if r.get("ha_source") == "spec" and r.get("ha_slit_source") == "sample_median":
+        if r.get("ha_source") == "spec" and r.get("ha_slit_source") in FALLBACK_S:
             note = r.get("ha_slit_note")
-            issues[i].append("slit_median" + (f" ({note})" if isinstance(note, str) and note else ""))
+            issues[i].append(f"slit_median {r.get('ha_slit_source')}" + (f" ({note})" if isinstance(note, str) and note else ""))
         R, Rhi = fv(r, "balmer_ratio"), fv(r, "balmer_ratio_err_hi")
         if np.isfinite(R) and np.isfinite(Rhi) and Rhi > 0 and (bh.R_INT - R) / Rhi > 2:
             issues[i].append(f"balmer_low R {R:.2f} +{Rhi:.2f}")
@@ -758,7 +936,7 @@ def summary(d, b, sp, fl):
     if len(g):
         print(f"  photometric / spectral Halpha ({len(g)}): median {g['ratio'].median():.2f}, "
               f"NMAD {bh.nmad(g['ratio'].to_numpy()):.2f}")
-        for src in ("direct", "sample_median"):
+        for src in dict.fromkeys(g["ha_slit_source"].dropna()):
             gg = g[g["ha_slit_source"] == src]
             if len(gg):
                 print(f"    {src:<14s} slit factor {len(gg):>3d}  median {gg['ratio'].median():.2f}")
@@ -777,16 +955,19 @@ def summary(d, b, sp, fl):
 def main():
     a = parse_args()
     print("checks/check_ha_corrections.py")
-    for k in ("ha_csv", "catalog", "isaac", "spec_root", "filter_dir", "bands_csv", "flags_csv", "outdir"):
+    for k in ("ha_csv", "catalog", "isaac", "spec_root", "filter_dir", "bands_csv", "slit_bands_csv",
+              "flags_csv", "outdir"):
         setattr(a, k, os.path.abspath(getattr(a, k)))
     print(f"  reading  {a.ha_csv}")
     print(f"  reading  {a.catalog}")
+    print(f"  reading  {a.slit_bands_csv}" + ("" if os.path.exists(a.slit_bands_csv) else "  (missing, skipped)"))
     if not a.reuse_bands:
         print(f"  reading  {a.isaac}")
         print(f"  reading  {a.spec_root}/<grating>_<filter>/<ID>_*_spectra_lime.fits")
         print(f"  reading  {a.filter_dir}/JWST_NIRCam.<FILT>.dat")
     os.makedirs(a.outdir, exist_ok=True)
-    figs = {k: f"{a.outdir}/{k}.png" for k in ("slit_factors", "balmer_dust", "ha_phot_vs_spec", "fesc_checks")}
+    figs = {k: f"{a.outdir}/{k}.png" for k in ("slit_summary", "dust_balmer_vs_sed", "slit_factors",
+                                                 "balmer_dust", "ha_phot_vs_spec", "fesc_checks")}
     print(f"  {'reading' if a.reuse_bands else 'writing'}  {a.bands_csv}")
     print(f"  writing  {a.flags_csv}")
     for p_ in figs.values():
@@ -814,6 +995,10 @@ def main():
     fl = flags(d, b, sp, a)
     fl.to_csv(a.flags_csv, index=False)
     summary(d, b, sp, fl)
+    slit_bands = pd.read_csv(a.slit_bands_csv) if os.path.exists(a.slit_bands_csv) else None
+    fig_slit_summary(d, figs["slit_summary"], slit_bands)
+    if num(d, "fesc_lya").notna().any():
+        fig_dust_compare(d, figs["dust_balmer_vs_sed"])
     print("\n  done")
     for p_ in [a.bands_csv, a.flags_csv] + list(figs.values()):
         if os.path.exists(p_):
